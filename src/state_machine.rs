@@ -2,90 +2,141 @@ use crate::dot::Dot;
 use crate::state::{Direction, DotState};
 
 // TODO: Interpreter needs to know if a character is an operator or not
-// TODO: Should return a list of dots in order to support dot splitting
-pub fn interpret(dot: &Dot, character: char) -> Dot {
+pub fn interpret(dot: &mut Dot, character: char, pending_dots: &mut Vec<Dot>) {
     match dot.state {
-        DotState::Travel => interpret_travel(dot, character),
-        DotState::Dead => *dot,
-        DotState::EndProgram => *dot,
-    }
+        DotState::Travel => interpret_travel(dot, character, pending_dots),
+        _ => {}
+    };
 }
 
-fn interpret_travel(dot: &Dot, character: char) -> Dot {
+fn interpret_travel(dot: &mut Dot, character: char, pending_dots: &mut Vec<Dot>) {
     match character {
         '-' => {
             if dot.direction.pipe() == '-' {
-                dot.step()
+                dot.step();
             } else {
-                dot.change_state(DotState::Dead)
+                dot.change_state(DotState::Dead);
             }
         }
         '|' => {
             if dot.direction.pipe() == '|' {
-                dot.step()
+                dot.step();
             } else {
-                dot.change_state(DotState::Dead)
+                dot.change_state(DotState::Dead);
             }
         }
-        '+' => dot.step(), // TODO: Check if it's an operator in the future
+        '+' => {
+            dot.step();
+        } // TODO: Check if it's an operator in the future
         '>' => {
             if dot.direction == Direction::Up || dot.direction == Direction::Down {
-                dot.change_dir(Direction::Right).step()
+                dot.change_dir(Direction::Right).step();
             } else {
-                dot.step()
+                dot.step();
             }
         }
         '<' => {
             if dot.direction == Direction::Up || dot.direction == Direction::Down {
-                dot.change_dir(Direction::Left).step()
+                dot.change_dir(Direction::Left).step();
             } else {
-                dot.step()
+                dot.step();
             }
         }
         '^' => {
             if dot.direction == Direction::Left || dot.direction == Direction::Right {
-                dot.change_dir(Direction::Up).step()
+                dot.change_dir(Direction::Up).step();
             } else {
-                dot.step()
+                dot.step();
             }
         }
         'v' => {
             if dot.direction == Direction::Left || dot.direction == Direction::Right {
-                dot.change_dir(Direction::Down).step()
+                dot.change_dir(Direction::Down).step();
             } else {
-                dot.step()
+                dot.step();
             }
         }
         '/' => match dot.direction {
-            Direction::Up => dot.change_dir(Direction::Right),
-            Direction::Down => dot.change_dir(Direction::Left),
-            Direction::Left => dot.change_dir(Direction::Down),
-            Direction::Right => dot.change_dir(Direction::Up),
-        }
-        .step(),
+            Direction::Up => {
+                dot.change_dir(Direction::Right).step();
+            }
+            Direction::Down => {
+                dot.change_dir(Direction::Left).step();
+            }
+            Direction::Left => {
+                dot.change_dir(Direction::Down).step();
+            }
+            Direction::Right => {
+                dot.change_dir(Direction::Up).step();
+            }
+        },
         '\\' => match dot.direction {
-            Direction::Up => dot.change_dir(Direction::Left),
-            Direction::Down => dot.change_dir(Direction::Right),
-            Direction::Left => dot.change_dir(Direction::Up),
-            Direction::Right => dot.change_dir(Direction::Down),
-        }
-        .step(),
+            Direction::Up => {
+                dot.change_dir(Direction::Left).step();
+            }
+            Direction::Down => {
+                dot.change_dir(Direction::Right).step();
+            }
+            Direction::Left => {
+                dot.change_dir(Direction::Up).step();
+            }
+            Direction::Right => {
+                dot.change_dir(Direction::Down).step();
+            }
+        },
         '(' => match dot.direction {
-            Direction::Up => dot.change_state(DotState::Dead),
-            Direction::Down => dot.change_state(DotState::Dead),
-            Direction::Left => dot.change_dir(Direction::Right),
-            Direction::Right => *dot,
-        }
-        .step(),
+            Direction::Up => {
+                dot.change_state(DotState::Dead).step();
+            }
+            Direction::Down => {
+                dot.change_state(DotState::Dead).step();
+            }
+            Direction::Left => {
+                dot.change_dir(Direction::Right).step();
+            }
+            Direction::Right => {
+                dot.step();
+            }
+        },
         ')' => match dot.direction {
-            Direction::Up => dot.change_state(DotState::Dead),
-            Direction::Down => dot.change_state(DotState::Dead),
-            Direction::Left => *dot,
-            Direction::Right => dot.change_dir(Direction::Left),
+            Direction::Up => {
+                dot.change_state(DotState::Dead).step();
+            }
+            Direction::Down => {
+                dot.change_state(DotState::Dead).step();
+            }
+            Direction::Left => {
+                dot.step();
+            }
+            Direction::Right => {
+                dot.change_dir(Direction::Left).step();
+            }
+        },
+        '*' => {
+            for d in &[
+                Direction::Up,
+                Direction::Down,
+                Direction::Left,
+                Direction::Right,
+            ] {
+                if d != &dot.direction && d != &dot.direction.reverse() {
+                    // only spawn the TWO perpendicular directions
+                    let mut new_dot = dot.clone();
+                    new_dot.change_dir(*d).step();
+                    pending_dots.push(new_dot);
+                }
+            }
+            // original dot keeps going forward
+            dot.step();
         }
-        .step(),
-        ' ' => dot.change_state(DotState::Dead),
-        '&' => dot.change_state(DotState::EndProgram), // TODO: check if it's an operator in the future
-        _ => dot.step(),
-    }
+        ' ' => {
+            dot.change_state(DotState::Dead);
+        }
+        '&' => {
+            dot.change_state(DotState::EndProgram);
+        } // TODO: check if it's an operator in the future
+        _ => {
+            dot.step();
+        }
+    };
 }

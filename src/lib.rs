@@ -8,7 +8,7 @@ use crossterm::style::Stylize;
 
 use crate::{
     dot::Dot,
-    state::{Direction, Position},
+    state::{Direction, DotState, Position},
 };
 
 pub struct AsciiField {
@@ -67,36 +67,62 @@ impl AsciiField {
         dots
     }
 
-    pub fn interpret(&self, dots: &Vec<Dot>) -> Vec<Dot> {
-        let mut new_dots = Vec::with_capacity(dots.len());
-        for dot in dots {
+    pub fn interpret(&self, dots: &mut Vec<Dot>, pending_dots: &mut Vec<Dot>) {
+        let mut program_ending = false;
+        for dot in dots.iter_mut() {
             if let Some(cell) = self.at(&dot.position) {
-                let new_dot = state_machine::interpret(dot, cell);
-                match new_dot.state {
-                    state::DotState::EndProgram => return Vec::new(), // Return the same program to indicate the end of the program
-                    state::DotState::Dead => (), // Do not add dead dots to the new list
-                    _ => new_dots.push(new_dot), // Add the new dot to the list if it's still alive
+                state_machine::interpret(dot, cell, pending_dots);
+                match dot.state {
+                    state::DotState::EndProgram => {
+                        program_ending = true;
+                        break;
+                    }
+                    state::DotState::Dead => {}
+                    _ => {}
                 }
             }
         }
-        new_dots
+        if program_ending {
+            dots.clear()
+        }
     }
 }
 
 pub struct ProgramState {
     field: AsciiField,
     dots: Vec<Dot>,
+    pending_dots: Vec<Dot>,
 }
 
 impl ProgramState {
     pub fn from_file(path: &str) -> Self {
         let field = AsciiField::from_file(path);
         let dots = field.initalize_dots();
-        ProgramState { field, dots }
+        ProgramState {
+            field,
+            dots,
+            pending_dots: Vec::with_capacity(10),
+        }
     }
 
     pub fn step(&mut self) {
-        self.dots = self.field.interpret(&self.dots);
+        // 1. Step all Dots
+        self.field.interpret(&mut self.dots, &mut self.pending_dots);
+
+        // 2. Compaction of Dots (remove dead)
+        let mut i = 0;
+        while i < self.dots.len() {
+            if self.dots[i].state == DotState::Dead {
+                self.dots.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+        // 3. Append new Dots
+        self.dots.extend_from_slice(&self.pending_dots);
+
+        // 4. Clear added dots from pending list
+        self.pending_dots.clear();
     }
 
     pub fn num_dots(&self) -> usize {
@@ -106,10 +132,6 @@ impl ProgramState {
 
 impl std::fmt::Debug for ProgramState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // writeln!(f, "Field:")?;
-        // for row in self.field.get_field() {
-        //     writeln!(f, "{}", row.iter().collect::<String>())?;
-        // }
         writeln!(f, "Dots:")?;
         for dot in &self.dots {
             writeln!(

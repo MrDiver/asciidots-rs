@@ -1,16 +1,14 @@
-use std::fs::File;
-use std::io::{prelude::*, stdout};
+use std::io::stdout;
 use std::time::Instant;
 
-use AsciidotsCompiler::{AsciiField, ProgramState};
+use AsciidotsCompiler::ProgramState;
 use crossterm::cursor::MoveTo;
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use crossterm::style::{Print, Stylize};
 use crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{event, execute, terminal};
 
 fn main() {
-    let mut program = ProgramState::from_file("samples/exponential.dots");
+    let mut program = ProgramState::from_file("samples/basic.dots");
     let mut stdout = stdout();
 
     terminal::enable_raw_mode().unwrap();
@@ -36,20 +34,24 @@ fn main() {
             iterations_per_step = 1;
         }
 
-        execute!(stdout, Clear(ClearType::All)).unwrap();
-        execute!(stdout, MoveTo(0, 0)).unwrap();
-        print!(
-            "Iteration: {:>6} StepSize: {:>6}\r\n",
-            iteration, iterations_per_step
-        );
-        print!("{}\r\n", program);
         let start = Instant::now();
         for _ in 0..iterations_per_step {
             program.step();
         }
-        print!("Elapsed: {:>10?}\r\n", start.elapsed());
+        let elapsed = start.elapsed();
+        let new_state_string = format!("{}", program);
+        execute!(stdout, Clear(ClearType::All)).unwrap();
+        execute!(stdout, MoveTo(0, 0)).unwrap();
+        print!(
+            "Iteration: {:>6} StepSize: {:>3} Num Dots: {}\r\n",
+            iteration,
+            iterations_per_step,
+            program.num_dots()
+        );
+        print!("{}\r\n", new_state_string);
+        print!("Elapsed: {:>10?}\r\n", elapsed);
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(10).saturating_sub(elapsed));
         iteration += iterations_per_step;
     }
 

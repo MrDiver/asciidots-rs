@@ -53,4 +53,12 @@ impl Direction {
             Direction::Left | Direction::Right => '-',
         }
     }
+    pub fn reverse(&self) -> Direction {
+        match *self {
+            Self::Up => Self::Down,
+            Self::Right => Self::Left,
+            Self::Down => Self::Up,
+            Self::Left => Self::Right,
+        }
+    }
 }
