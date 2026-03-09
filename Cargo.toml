@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 colored = "3.1.1"
 crossterm = "0.29.0"
+miette = { version = "7.6.0", features = ["fancy"] }
+rustc-hash = "2.1.1"
 
 [dev-dependencies]
 criterion = "0.8.2"

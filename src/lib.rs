@@ -1,90 +1,45 @@
 pub mod dot;
+pub mod interpreter;
+pub mod parser;
 pub mod state;
-pub mod state_machine;
+pub mod token;
 
-use std::rc::Rc;
+use std::collections::HashMap;
 
 use crossterm::style::Stylize;
 
 use crate::{
-    dot::Dot,
-    state::{Direction, DotState, Position},
+    dot::{Dot, DotState, Position},
+    parser::{Diagnostic, Lexer, Severity},
+    token::{Direction, SpanToken, Spanned, Token},
 };
 
+pub type TokenField = HashMap<(usize, usize), SpanToken>;
+
+#[derive(Debug)]
 pub struct AsciiField {
-    field: Vec<Vec<char>>,
+    field: TokenField,
 }
 
 impl AsciiField {
-    pub fn from_file(path: &str) -> Self {
-        let contents = std::fs::read_to_string(path).expect("Failed to read file");
-        let field: Vec<Vec<char>> = contents
-            .lines()
-            .map(|line| line.chars().collect())
-            .collect();
-        AsciiField { field: field }
+    pub fn from_string(content: &str) -> Result<Self, Vec<Diagnostic>> {
+        let field: Vec<Vec<char>> = content.lines().map(|line| line.chars().collect()).collect();
+        let mut lexer = Lexer::new(field.clone());
+        lexer.run();
+        let field = lexer.finish()?;
+        Ok(AsciiField { field: field })
     }
 
-    pub fn get_field(&self) -> &Vec<Vec<char>> {
+    pub fn get_field(&self) -> &TokenField {
         &self.field
     }
 
-    fn at(&self, position: &Position) -> Option<char> {
-        if position.y >= 0 && (position.y as usize) < self.field.len() {
-            let row = &self.field[position.y as usize];
-            if position.x >= 0 && (position.x as usize) < row.len() {
-                return Some(row[position.x as usize]);
-            }
-        }
-        None
-    }
-
-    pub fn initalize_dots(&self) -> Vec<Dot> {
-        let mut dots = Vec::new();
-        for y in 0..self.field.len() {
-            for x in 0..self.field[y].len() {
-                let cell = self.field[y][x];
-                let position = Position::new(x as i32, y as i32);
-                if cell == '.' {
-                    for direction in &[
-                        Direction::Up,
-                        Direction::Down,
-                        Direction::Left,
-                        Direction::Right,
-                    ] {
-                        let offsetpos = position + direction.offset();
-                        if let Some(pipe) = self.at(&offsetpos)
-                            && pipe == direction.pipe()
-                        {
-                            let dot = Dot::new(*direction, position, 0.0);
-                            dots.push(dot);
-                            break; // Only one dot per position, so break after finding the first valid direction
-                        }
-                    }
-                }
-            }
-        }
-        dots
-    }
-
-    pub fn interpret(&self, dots: &mut Vec<Dot>, pending_dots: &mut Vec<Dot>) {
-        let mut program_ending = false;
-        for dot in dots.iter_mut() {
-            if let Some(cell) = self.at(&dot.position) {
-                state_machine::interpret(dot, cell, pending_dots);
-                match dot.state {
-                    state::DotState::EndProgram => {
-                        program_ending = true;
-                        break;
-                    }
-                    state::DotState::Dead => {}
-                    _ => {}
-                }
-            }
-        }
-        if program_ending {
-            dots.clear()
-        }
+    pub fn at(&self, position: &Position) -> Token {
+        let &Position { x, y } = position;
+        self.field
+            .get(&(x as usize, y as usize))
+            .map(|x| *x.inner())
+            .unwrap_or_else(|| Token::Empty)
     }
 }
 
@@ -92,22 +47,73 @@ pub struct ProgramState {
     field: AsciiField,
     dots: Vec<Dot>,
     pending_dots: Vec<Dot>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl ProgramState {
-    pub fn from_file(path: &str) -> Self {
-        let field = AsciiField::from_file(path);
-        let dots = field.initalize_dots();
-        ProgramState {
+    pub fn from_string(content: &str) -> Result<Self, Vec<Diagnostic>> {
+        let field = AsciiField::from_string(content)?;
+        Ok(ProgramState {
             field,
-            dots,
+            dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
+            diagnostics: Vec::new(),
+        })
+    }
+    
+    pub fn get_field(&self) -> &AsciiField {
+        &self.field
+    }
+
+    pub fn initalize_dots(&mut self) {
+        for ((x, y), token) in self.field.get_field().iter() {
+            let position = Position::new(*x as i32, *y as i32);
+            if let Token::Dot = token.inner() {
+                for direction in &[
+                    Direction::Up,
+                    Direction::Down,
+                    Direction::Left,
+                    Direction::Right,
+                ] {
+                    let offsetpos = position + (*direction).into();
+                    if let Token::Pipe(orientation) = self.field.at(&offsetpos)
+                        && orientation == direction.orientation()
+                    {
+                        let dot = Dot::new(*direction, position, 0.0);
+                        self.dots.push(dot);
+                        break; // Only one dot per position, so break after finding the first valid direction
+                    }
+                }
+            }
         }
     }
 
-    pub fn step(&mut self) {
+    fn interpret(&mut self) {
+        let mut program_ending = false;
+        for dot in self.dots.iter_mut() {
+            let token = self.field.at(&dot.position);
+            if let Err(d) = interpreter::interpret(dot, &token, &mut self.pending_dots) {
+                let Position { x, y } = dot.position;
+                self.diagnostics
+                    .push(Diagnostic::new(x as usize, y as usize, d, Severity::Error));
+            }
+            match dot.state {
+                DotState::EndProgram => {
+                    program_ending = true;
+                    break;
+                }
+                DotState::Dead => {}
+                _ => {}
+            }
+        }
+        if program_ending {
+            self.dots.clear();
+        }
+    }
+
+    pub fn step(&mut self) -> Result<(), &[Diagnostic]> {
         // 1. Step all Dots
-        self.field.interpret(&mut self.dots, &mut self.pending_dots);
+        self.interpret();
 
         // 2. Compaction of Dots (remove dead)
         let mut i = 0;
@@ -123,15 +129,34 @@ impl ProgramState {
 
         // 4. Clear added dots from pending list
         self.pending_dots.clear();
+
+        if self.diagnostics.len() > 0 {
+            Err(&self.diagnostics)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn num_dots(&self) -> usize {
         self.dots.len()
     }
+    
+    pub fn get_dots(&self) -> &[Dot] {
+        &self.dots
+    }
 }
 
 impl std::fmt::Debug for ProgramState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "Tokens: {:?}",
+            self.field
+                .get_field()
+                .iter()
+                .map(|t| t.1.inner())
+                .collect::<Vec<_>>()
+        )?;
         writeln!(f, "Dots:")?;
         for dot in &self.dots {
             writeln!(
@@ -139,28 +164,6 @@ impl std::fmt::Debug for ProgramState {
                 "Dot at ({}, {}) facing {:?} with value {:?}",
                 dot.position.x, dot.position.y, dot.direction, dot.value
             )?;
-        }
-        Ok(())
-    }
-}
-
-impl std::fmt::Display for ProgramState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let dot_positions: std::collections::HashSet<(i32, i32)> = self
-            .dots
-            .iter()
-            .map(|d| (d.position.x, d.position.y))
-            .collect();
-        for (y, row) in self.field.get_field().iter().enumerate() {
-            for (x, cell) in row.iter().enumerate() {
-                let cell = format!("{}", cell);
-                if dot_positions.contains(&(x as i32, y as i32)) {
-                    write!(f, "{}", cell.red())?;
-                } else {
-                    write!(f, "{}", cell)?;
-                }
-            }
-            write!(f, "\r\n")?;
         }
         Ok(())
     }
