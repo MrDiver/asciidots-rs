@@ -1,5 +1,5 @@
 use AsciidotsCompiler::dot::{Dot, Position};
-use AsciidotsCompiler::interpreter;
+use AsciidotsCompiler::interpreter::{self, DotMachine};
 use AsciidotsCompiler::parser::Lexer;
 use AsciidotsCompiler::token::{Direction, Token};
 use AsciidotsCompiler::{AsciiField, ProgramState};
@@ -19,30 +19,36 @@ fn lex_source(source: &str) {
     let field: Vec<Vec<char>> = source.lines().map(|line| line.chars().collect()).collect();
     let mut lexer = Lexer::new(field);
     lexer.run();
-    let tokens = lexer.finish().expect("lexing should succeed for benchmark input");
+    let tokens = lexer
+        .finish()
+        .expect("lexing should succeed for benchmark input");
     black_box(tokens);
 }
 
 fn bench_lexing(c: &mut Criterion) {
     let mut group = c.benchmark_group("lexing");
-    group.bench_function("basic",       |b| b.iter(|| lex_source(black_box(BASIC))));
-    group.bench_function("movement",    |b| b.iter(|| lex_source(black_box(MOVEMENT))));
-    group.bench_function("counter",     |b| b.iter(|| lex_source(black_box(COUNTER))));
-    group.bench_function("fibonacci",   |b| b.iter(|| lex_source(black_box(FIBONACCI))));
-    group.bench_function("primes",      |b| b.iter(|| lex_source(black_box(PRIMES))));
-    group.bench_function("exponential", |b| b.iter(|| lex_source(black_box(EXPONENTIAL))));
-    group.bench_function("deathfactory", |b| b.iter(|| lex_source(black_box(DEATHFACTORY))));
+    group.bench_function("basic", |b| b.iter(|| lex_source(black_box(BASIC))));
+    group.bench_function("movement", |b| b.iter(|| lex_source(black_box(MOVEMENT))));
+    group.bench_function("counter", |b| b.iter(|| lex_source(black_box(COUNTER))));
+    group.bench_function("fibonacci", |b| b.iter(|| lex_source(black_box(FIBONACCI))));
+    group.bench_function("primes", |b| b.iter(|| lex_source(black_box(PRIMES))));
+    group.bench_function("exponential", |b| {
+        b.iter(|| lex_source(black_box(EXPONENTIAL)))
+    });
+    group.bench_function("deathfactory", |b| {
+        b.iter(|| lex_source(black_box(DEATHFACTORY)))
+    });
     group.finish();
 }
 
 fn bench_parsing(c: &mut Criterion) {
     let mut group = c.benchmark_group("parsing");
     for (name, src) in &[
-        ("basic",       BASIC),
-        ("movement",    MOVEMENT),
-        ("counter",     COUNTER),
-        ("fibonacci",   FIBONACCI),
-        ("primes",      PRIMES),
+        ("basic", BASIC),
+        ("movement", MOVEMENT),
+        ("counter", COUNTER),
+        ("fibonacci", FIBONACCI),
+        ("primes", PRIMES),
         ("exponential", EXPONENTIAL),
         ("deathfactory", DEATHFACTORY),
     ] {
@@ -61,11 +67,11 @@ fn bench_parsing(c: &mut Criterion) {
 fn bench_single_dot_interpret(c: &mut Criterion) {
     c.bench_function("interpreter_single_dot", |b| {
         b.iter(|| {
-            let mut dot = Dot::new(Direction::Right, Position::new(10, 10), 0.0);
+            let mut dot = DotMachine::from(Dot::new(Direction::Right, Position::new(10, 10), 0.0));
             let token = Token::ForceDirection(Direction::Down);
             let mut pending_dots = Vec::with_capacity(2);
 
-            interpreter::interpret(&mut dot, black_box(&token), &mut pending_dots)
+            dot.run(black_box(&token), &mut pending_dots)
                 .expect("single-step interpreter benchmark should not fail");
 
             black_box(dot);
@@ -88,9 +94,9 @@ fn bench_throughput_1000_steps(c: &mut Criterion) {
     let mut group = c.benchmark_group("throughput_1000_steps");
 
     for (name, src) in &[
-        ("counter",     COUNTER),
-        ("fibonacci",   FIBONACCI),
-        ("primes",      PRIMES),
+        ("counter", COUNTER),
+        ("fibonacci", FIBONACCI),
+        ("primes", PRIMES),
         ("deathfactory", DEATHFACTORY),
     ] {
         let src = *src;
@@ -294,9 +300,5 @@ criterion_group!(
     bench_throughput_1000_steps,
     bench_program_step
 );
-criterion_group!(
-    benches_heavy,
-    bench_cleanup,
-    bench_heavy_workloads
-);
+criterion_group!(benches_heavy, bench_cleanup, bench_heavy_workloads);
 criterion_main!(benches, benches_heavy);

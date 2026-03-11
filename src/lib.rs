@@ -4,8 +4,11 @@ pub mod parser;
 pub mod state;
 pub mod token;
 
+use std::collections::VecDeque;
+
 use crate::{
-    dot::{Dot, DotState, Position},
+    dot::{Dot, Position},
+    interpreter::{DotMachine, MachineEvent, MachineState},
     parser::{Diagnostic, Lexer, Severity},
     token::{Direction, SpanToken, Token},
 };
@@ -40,29 +43,36 @@ impl AsciiField {
     }
 }
 
+struct OperatorQueues<'a> {
+    horizontal: VecDeque<&'a DotMachine>,
+    vertical: VecDeque<&'a DotMachine>,
+}
+
 pub struct ProgramState {
     field: AsciiField,
-    dots: Vec<Dot>,
-    pending_dots: Vec<Dot>,
+    dots: Vec<DotMachine>,
+    pending_dots: Vec<DotMachine>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl ProgramState {
     pub fn from_string(content: &str) -> Result<Self, Vec<Diagnostic>> {
         let field = AsciiField::from_string(content)?;
-        Ok(ProgramState {
+        let mut state = ProgramState {
             field,
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
-        })
+        };
+        state.initalize();
+        Ok(state)
     }
-    
+
     pub fn get_field(&self) -> &AsciiField {
         &self.field
     }
 
-    pub fn initalize_dots(&mut self) {
+    fn initalize(&mut self) {
         for row in self.field.get_field() {
             for token in row {
                 let position = Position::new(token.col() as i32, token.line() as i32);
@@ -77,8 +87,11 @@ impl ProgramState {
                         if let Token::Pipe(orientation) = self.field.at(&offsetpos)
                             && orientation == direction.orientation()
                         {
-                            let dot = Dot::new(*direction, position, 0.0);
-                            self.dots.push(dot);
+                            self.dots.push(DotMachine::new(
+                                *direction,
+                                token.col() as i32,
+                                token.line() as i32,
+                            ));
                             break; // Only one dot per position, so break after finding the first valid direction
                         }
                     }
@@ -88,32 +101,38 @@ impl ProgramState {
     }
 
     fn interpret(&mut self) {
-        let mut program_ending = false;
         for dot in self.dots.iter_mut() {
-            let token = self.field.at(&dot.position);
-            if let Err(d) = interpreter::interpret(dot, &token, &mut self.pending_dots) {
-                let Position { x, y } = dot.position;
-                self.diagnostics
-                    .push(Diagnostic::new(x as usize, y as usize, d, Severity::Error));
-            }
-            match dot.state {
-                DotState::EndProgram => {
-                    program_ending = true;
-                    break;
+            let token = &self.field.at(dot.position());
+            let event = match dot.run(token, &mut self.pending_dots) {
+                Ok(e) => e,
+                Err(d) => {
+                    let Position { x, y } = dot.position();
+                    self.diagnostics.push(Diagnostic::new(
+                        *x as usize,
+                        *y as usize,
+                        d,
+                        Severity::Error,
+                    ));
+                    MachineEvent::EndProgram
                 }
-                DotState::Dead => {}
-                _ => {}
+            };
+            match event {
+                MachineEvent::EndProgram => {
+                    self.dots.clear();
+                    return;
+                }
+                _ => {
+                    let lookahead = self.field.at(dot.position());
+                    dot.next(&event, &lookahead)
+                }
             }
-        }
-        if program_ending {
-            self.dots.clear();
         }
     }
 
-    pub(crate) fn cleanup_dead_dots(dots: &mut Vec<Dot>) {
+    pub(crate) fn cleanup_dead_dots(dots: &mut Vec<DotMachine>) {
         let mut i = 0;
         while i < dots.len() {
-            if dots[i].state == DotState::Dead {
+            if dots[i].is_dead() {
                 dots.swap_remove(i);
             } else {
                 i += 1;
@@ -143,8 +162,8 @@ impl ProgramState {
     pub fn num_dots(&self) -> usize {
         self.dots.len()
     }
-    
-    pub fn get_dots(&self) -> &[Dot] {
+
+    pub fn get_dots(&self) -> &[DotMachine] {
         &self.dots
     }
 }
@@ -162,11 +181,7 @@ impl std::fmt::Debug for ProgramState {
         )?;
         writeln!(f, "Dots:")?;
         for dot in &self.dots {
-            writeln!(
-                f,
-                "Dot at ({}, {}) facing {:?} with value {:?}",
-                dot.position.x, dot.position.y, dot.direction, dot.value
-            )?;
+            writeln!(f, "{}", dot)?;
         }
         Ok(())
     }

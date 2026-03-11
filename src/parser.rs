@@ -153,7 +153,9 @@ impl Lexer {
                         '+' => Ok(Token::CrossPipe),
                         '&' => Ok(Token::StopProgram),
                         '*' => Ok(Token::Duplicate),
-                        x if x.is_ascii_digit() => Ok(Token::Digit(x)),
+                        x if x.is_ascii_digit() => {
+                            Ok(Token::Digit(x.to_string().parse().unwrap_or_default()))
+                        }
                         x if x.is_ascii_alphanumeric() => Ok(Token::Char(x)),
                         _ => Ok(Token::Empty),
                     }
@@ -185,4 +187,3 @@ impl Lexer {
         }
     }
 }
-

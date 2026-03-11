@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use AsciidotsCompiler::dot::Dot;
+use AsciidotsCompiler::interpreter::DotMachine;
 use AsciidotsCompiler::{AsciiField, ProgramState, parser};
 use clap::Parser;
 use crossterm::cursor::MoveTo;
@@ -60,29 +61,32 @@ impl Renderer {
                 grid[token.line()][token.col()] = token.repr();
             }
         }
-        Self { grid, out: BufWriter::new(stdout()) }
-    }
-
-    fn render(&mut self, dots: &[Dot]) {
-  let dot_positions: HashSet<(usize, usize)> = dots
-        .iter()
-        .map(|d| (d.position.x as usize, d.position.y as usize))
-        .collect();
-
-    queue!(self.out, MoveTo(0, 0)).unwrap();
-
-    for (y, row) in self.grid.iter().enumerate() {
-        for (x, ch) in row.iter().enumerate() {
-            if dot_positions.contains(&(x, y)) {
-                queue!(self.out, Print(format!("\x1b[31m{}\x1b[0m", ch))).unwrap();
-            } else {
-                queue!(self.out, Print(ch)).unwrap();
-            }
+        Self {
+            grid,
+            out: BufWriter::new(stdout()),
         }
-        queue!(self.out, Print("\r\n")).unwrap();
     }
 
-    self.out.flush().unwrap();
+    fn render(&mut self, dots: &[DotMachine]) {
+        let dot_positions: HashSet<(usize, usize)> = dots
+            .iter()
+            .map(|d| (d.position().x as usize, d.position().y as usize))
+            .collect();
+
+        queue!(self.out, MoveTo(0, 0)).unwrap();
+
+        for (y, row) in self.grid.iter().enumerate() {
+            for (x, ch) in row.iter().enumerate() {
+                if dot_positions.contains(&(x, y)) {
+                    queue!(self.out, Print(format!("\x1b[31m{}\x1b[0m", ch))).unwrap();
+                } else {
+                    queue!(self.out, Print(ch)).unwrap();
+                }
+            }
+            queue!(self.out, Print("\r\n")).unwrap();
+        }
+
+        self.out.flush().unwrap();
     }
 }
 
@@ -95,7 +99,6 @@ fn main() -> miette::Result<()> {
         Ok(p) => p,
         Err(diagnostics) => return Err(miette::Report::new(ProgramDiagnostics { diagnostics })),
     };
-    program.initalize_dots();
     let mut renderer = Renderer::new(program.get_field());
     println!("Loaded field with {} dots.", program.num_dots());
     let mut stdout = stdout();
@@ -107,6 +110,7 @@ fn main() -> miette::Result<()> {
     let mut iteration = 0;
     let mut iterations_per_step = 1;
     let mut step_ms = args.ms as i64;
+    let mut running = true;
     // Print loop
     while program.num_dots() > 0 {
         if event::poll(std::time::Duration::from_millis(16)).unwrap()
@@ -118,6 +122,7 @@ fn main() -> miette::Result<()> {
                 KeyCode::Char('s') => iterations_per_step -= 1000,
                 KeyCode::Char('a') => step_ms -= 10,
                 KeyCode::Char('d') => step_ms += 10,
+                KeyCode::Char(' ') => running = !running,
                 _ => {}
             }
         }
@@ -127,11 +132,13 @@ fn main() -> miette::Result<()> {
         step_ms = step_ms.clamp(1, 1000);
 
         let start = Instant::now();
-        for _ in 0..iterations_per_step {
-            if let Err(d) = program.step() {
-                return Err(miette::Report::new(ProgramDiagnostics {
-                    diagnostics: Vec::from(d),
-                }));
+        if running {
+            for _ in 0..iterations_per_step {
+                if let Err(d) = program.step() {
+                    return Err(miette::Report::new(ProgramDiagnostics {
+                        diagnostics: Vec::from(d),
+                    }));
+                }
             }
         }
         let elapsed = start.elapsed();
@@ -149,8 +156,13 @@ fn main() -> miette::Result<()> {
         )
         .unwrap();
         queue!(stdout, Print(format!("Elapsed: {:>10?}\r\n", elapsed))).unwrap();
+        for dot in program.get_dots() {
+            queue!(stdout, Print(format!("{}\r\n", dot))).unwrap();
+        }
 
-        std::thread::sleep(std::time::Duration::from_millis(step_ms as u64).saturating_sub(elapsed));
+        std::thread::sleep(
+            std::time::Duration::from_millis(step_ms as u64).saturating_sub(elapsed),
+        );
         iteration += iterations_per_step;
     }
 

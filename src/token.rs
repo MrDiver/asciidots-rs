@@ -67,7 +67,7 @@ pub enum Token {
     StopProgram,               // Standalone &
     ForceDirection(Direction), // > < ^ v
     Duplicate,                 // Standalone *
-    Digit(char),               // Any digit 1-9
+    Digit(u8),                 // Any digit 1-9
     Char(char),                // Any Char
 }
 

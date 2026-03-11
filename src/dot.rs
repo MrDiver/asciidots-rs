@@ -2,13 +2,6 @@ use std::ops::Add;
 
 use crate::token::{Direction, Orientation};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DotState {
-    Travel,
-    Dead,
-    EndProgram,
-}
-
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct Position {
     pub x: i32,
@@ -74,7 +67,7 @@ pub struct Dot {
     pub direction: Direction,
     pub position: Position,
     pub value: f64,
-    pub state: DotState,
+    pub id: u64,
 }
 
 impl Dot {
@@ -83,30 +76,27 @@ impl Dot {
             direction,
             position,
             value,
-            state: DotState::Travel,
+            id: 0,
         }
     }
 
     pub fn step(&mut self) -> &mut Self {
-        if self.state == DotState::Dead {
-            return self;
-        }
         self.position = self.position + self.direction.into();
         self
     }
 
-    pub fn change_dir(&mut self, new_dir: Direction) -> &mut Self {
+    pub fn set_dir(&mut self, new_dir: Direction) -> &mut Self {
         self.direction = new_dir;
         self
     }
 
-    pub fn change_value(&mut self, new_value: f64) -> &mut Self {
+    pub fn set_value(&mut self, new_value: f64) -> &mut Self {
         self.value = new_value;
         self
     }
 
-    pub fn change_state(&mut self, new_state: DotState) -> &mut Self {
-        self.state = new_state;
+    pub fn set_id(&mut self, new_id: u64) -> &mut Self {
+        self.id = new_id;
         self
     }
 
