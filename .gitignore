@@ -1,2 +1,4 @@
 target/
 samples/superbig.dots
+.idea/
+.vscode/
