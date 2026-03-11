@@ -1,6 +1,6 @@
 use crate::dot::{Dot, DotState, Position};
 use crate::parser::DiagnosticKind;
-use crate::token::{Direction, MirrorKind, Orientation, SpanToken, Token};
+use crate::token::{Direction, MirrorKind, Orientation, Token};
 
 // TODO: Interpreter needs to know if a character is an operator or not
 pub fn interpret(

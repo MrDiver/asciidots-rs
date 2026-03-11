@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::token::{Direction, MirrorKind, Orientation, SpanToken, Token};
 
 #[derive(Clone, Copy, Debug)]
@@ -39,15 +37,26 @@ impl Diagnostic {
 
 pub struct Lexer {
     grid: Vec<Vec<char>>,
-    tokens: HashMap<(usize, usize), SpanToken>,
+    tokens: Vec<Vec<SpanToken>>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl Lexer {
     pub fn new(grid: Vec<Vec<char>>) -> Self {
+        let tokens = grid
+            .iter()
+            .enumerate()
+            .map(|(y, row)| {
+                row.iter()
+                    .enumerate()
+                    .map(|(x, character)| SpanToken::new(Token::Empty, x, y, *character))
+                    .collect()
+            })
+            .collect();
+
         Self {
             grid,
-            tokens: HashMap::new(),
+            tokens,
             diagnostics: Vec::new(),
         }
     }
@@ -157,10 +166,8 @@ impl Lexer {
         for (y, row) in self.grid.iter().enumerate() {
             for (x, character) in row.iter().enumerate() {
                 match self.lex_char(*character, x, y) {
-                    Ok(Token::Empty) => {}
                     Ok(t) => {
-                        self.tokens
-                            .insert((x, y), SpanToken::new(t, x, y, *character));
+                        self.tokens[y][x] = SpanToken::new(t, x, y, *character);
                     }
                     Err(e) => {
                         self.diagnostics.push(e);
@@ -170,7 +177,7 @@ impl Lexer {
         }
     }
 
-    pub fn finish(self) -> Result<HashMap<(usize, usize), SpanToken>, Vec<Diagnostic>> {
+    pub fn finish(self) -> Result<Vec<Vec<SpanToken>>, Vec<Diagnostic>> {
         if self.diagnostics.is_empty() {
             Ok(self.tokens)
         } else {

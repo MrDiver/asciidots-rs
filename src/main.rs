@@ -8,7 +8,7 @@ use AsciidotsCompiler::dot::Dot;
 use AsciidotsCompiler::{AsciiField, ProgramState, parser};
 use crossterm::cursor::MoveTo;
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use crossterm::style::{Color, Print, SetForegroundColor, Stylize};
+use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{event, execute, queue, terminal};
 use miette::IntoDiagnostic;
@@ -27,21 +27,27 @@ impl std::fmt::Display for ProgramDiagnostics {
 }
 
 struct Renderer {
-    size: (usize, usize),
     grid: Vec<Vec<char>>,
     out: BufWriter<std::io::Stdout>,
 }
 
 impl Renderer {
     fn new(field: &AsciiField) -> Self {
-        let max_col = field.get_field().keys().map(|(x, _)| *x).max().unwrap_or(0);
-        let max_row = field.get_field().keys().map(|(_, y)| *y).max().unwrap_or(0);
-        let size = (max_col + 1, max_row + 1);
+        let max_col = field
+            .get_field()
+            .iter()
+            .map(|row| row.len())
+            .max()
+            .unwrap_or(0);
+        let max_row = field.get_field().len();
+        let size = (max_col, max_row);
         let mut grid = vec![vec![' '; size.0]; size.1];
-        for ((x, y), token) in field.get_field().iter() {
-            grid[*y][*x] = token.repr();
+        for row in field.get_field() {
+            for token in row {
+                grid[token.line()][token.col()] = token.repr();
+            }
         }
-        Self { size, grid, out: BufWriter::new(stdout()) }
+        Self { grid, out: BufWriter::new(stdout()) }
     }
 
     fn render(&mut self, dots: &[Dot]) {
@@ -69,7 +75,7 @@ impl Renderer {
 
 fn main() -> miette::Result<()> {
     println!("Loading Map");
-    let content = fs::read_to_string("samples/basic.dots").into_diagnostic()?;
+    let content = fs::read_to_string("samples/infinitemirror.dots").into_diagnostic()?;
     println!("Parsing content");
     let mut program = match ProgramState::from_string(&content) {
         Ok(p) => p,
@@ -94,8 +100,8 @@ fn main() -> miette::Result<()> {
         {
             match code {
                 KeyCode::Char('q') => break,
-                KeyCode::Char('w') => iterations_per_step += 10,
-                KeyCode::Char('s') => iterations_per_step -= 10,
+                KeyCode::Char('w') => iterations_per_step += 100,
+                KeyCode::Char('s') => iterations_per_step -= 100,
                 _ => {}
             }
         }

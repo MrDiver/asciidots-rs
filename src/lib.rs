@@ -4,17 +4,13 @@ pub mod parser;
 pub mod state;
 pub mod token;
 
-use std::collections::HashMap;
-
-use crossterm::style::Stylize;
-
 use crate::{
     dot::{Dot, DotState, Position},
     parser::{Diagnostic, Lexer, Severity},
-    token::{Direction, SpanToken, Spanned, Token},
+    token::{Direction, SpanToken, Token},
 };
 
-pub type TokenField = HashMap<(usize, usize), SpanToken>;
+pub type TokenField = Vec<Vec<SpanToken>>;
 
 #[derive(Debug)]
 pub struct AsciiField {
@@ -27,7 +23,7 @@ impl AsciiField {
         let mut lexer = Lexer::new(field.clone());
         lexer.run();
         let field = lexer.finish()?;
-        Ok(AsciiField { field: field })
+        Ok(AsciiField { field })
     }
 
     pub fn get_field(&self) -> &TokenField {
@@ -37,8 +33,9 @@ impl AsciiField {
     pub fn at(&self, position: &Position) -> Token {
         let &Position { x, y } = position;
         self.field
-            .get(&(x as usize, y as usize))
-            .map(|x| *x.inner())
+            .get(y as usize)
+            .and_then(|row| row.get(x as usize))
+            .map(|token| *token.inner())
             .unwrap_or_else(|| Token::Empty)
     }
 }
@@ -66,22 +63,24 @@ impl ProgramState {
     }
 
     pub fn initalize_dots(&mut self) {
-        for ((x, y), token) in self.field.get_field().iter() {
-            let position = Position::new(*x as i32, *y as i32);
-            if let Token::Dot = token.inner() {
-                for direction in &[
-                    Direction::Up,
-                    Direction::Down,
-                    Direction::Left,
-                    Direction::Right,
-                ] {
-                    let offsetpos = position + (*direction).into();
-                    if let Token::Pipe(orientation) = self.field.at(&offsetpos)
-                        && orientation == direction.orientation()
-                    {
-                        let dot = Dot::new(*direction, position, 0.0);
-                        self.dots.push(dot);
-                        break; // Only one dot per position, so break after finding the first valid direction
+        for row in self.field.get_field() {
+            for token in row {
+                let position = Position::new(token.col() as i32, token.line() as i32);
+                if let Token::Dot = token.inner() {
+                    for direction in &[
+                        Direction::Up,
+                        Direction::Down,
+                        Direction::Left,
+                        Direction::Right,
+                    ] {
+                        let offsetpos = position + (*direction).into();
+                        if let Token::Pipe(orientation) = self.field.at(&offsetpos)
+                            && orientation == direction.orientation()
+                        {
+                            let dot = Dot::new(*direction, position, 0.0);
+                            self.dots.push(dot);
+                            break; // Only one dot per position, so break after finding the first valid direction
+                        }
                     }
                 }
             }
@@ -111,26 +110,30 @@ impl ProgramState {
         }
     }
 
+    pub(crate) fn cleanup_dead_dots(dots: &mut Vec<Dot>) {
+        let mut i = 0;
+        while i < dots.len() {
+            if dots[i].state == DotState::Dead {
+                dots.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     pub fn step(&mut self) -> Result<(), &[Diagnostic]> {
         // 1. Step all Dots
         self.interpret();
 
         // 2. Compaction of Dots (remove dead)
-        let mut i = 0;
-        while i < self.dots.len() {
-            if self.dots[i].state == DotState::Dead {
-                self.dots.swap_remove(i);
-            } else {
-                i += 1;
-            }
-        }
+        Self::cleanup_dead_dots(&mut self.dots);
         // 3. Append new Dots
         self.dots.extend_from_slice(&self.pending_dots);
 
         // 4. Clear added dots from pending list
         self.pending_dots.clear();
 
-        if self.diagnostics.len() > 0 {
+        if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
         } else {
             Ok(())
@@ -154,7 +157,7 @@ impl std::fmt::Debug for ProgramState {
             self.field
                 .get_field()
                 .iter()
-                .map(|t| t.1.inner())
+                .flat_map(|row| row.iter().map(|token| token.inner()))
                 .collect::<Vec<_>>()
         )?;
         writeln!(f, "Dots:")?;
