@@ -39,7 +39,7 @@ fn interpret_travel(
             let Position { x, y } = dot.direction.into();
             let tmp = match kind {
                 MirrorKind::Forward => Position { x: -y, y: -x },
-                MirrorKind::Backward => Position { x: y, y: -x },
+                MirrorKind::Backward => Position { x: y, y: x },
             }
             .into();
             if let Some(dir) = tmp {

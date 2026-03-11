@@ -2,16 +2,29 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
 use std::io::{BufWriter, Write, stdout};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use AsciidotsCompiler::dot::Dot;
 use AsciidotsCompiler::{AsciiField, ProgramState, parser};
+use clap::Parser;
 use crossterm::cursor::MoveTo;
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{event, execute, queue, terminal};
 use miette::IntoDiagnostic;
+
+#[derive(Parser, Debug)]
+#[command(name = "asciidots", about = "Run an AsciiDots program")]
+struct Args {
+    /// Path to the .dots file to execute
+    file: PathBuf,
+
+    /// Delay between rendered frames in milliseconds (default: 100)
+    #[arg(long, default_value_t = 100)]
+    ms: u64,
+}
 
 #[derive(Debug, miette::Diagnostic)]
 pub struct ProgramDiagnostics {
@@ -74,8 +87,9 @@ impl Renderer {
 }
 
 fn main() -> miette::Result<()> {
+    let args = Args::parse();
     println!("Loading Map");
-    let content = fs::read_to_string("samples/infinitemirror.dots").into_diagnostic()?;
+    let content = fs::read_to_string(&args.file).into_diagnostic()?;
     println!("Parsing content");
     let mut program = match ProgramState::from_string(&content) {
         Ok(p) => p,
@@ -83,7 +97,6 @@ fn main() -> miette::Result<()> {
     };
     program.initalize_dots();
     let mut renderer = Renderer::new(program.get_field());
-    println!("{:#?}", program);
     println!("Loaded field with {} dots.", program.num_dots());
     let mut stdout = stdout();
 
@@ -93,6 +106,7 @@ fn main() -> miette::Result<()> {
 
     let mut iteration = 0;
     let mut iterations_per_step = 1;
+    let mut step_ms = args.ms as i64;
     // Print loop
     while program.num_dots() > 0 {
         if event::poll(std::time::Duration::from_millis(16)).unwrap()
@@ -100,14 +114,17 @@ fn main() -> miette::Result<()> {
         {
             match code {
                 KeyCode::Char('q') => break,
-                KeyCode::Char('w') => iterations_per_step += 100,
-                KeyCode::Char('s') => iterations_per_step -= 100,
+                KeyCode::Char('w') => iterations_per_step += 1000,
+                KeyCode::Char('s') => iterations_per_step -= 1000,
+                KeyCode::Char('a') => step_ms -= 10,
+                KeyCode::Char('d') => step_ms += 10,
                 _ => {}
             }
         }
         if iterations_per_step < 1 {
             iterations_per_step = 1;
         }
+        step_ms = step_ms.clamp(1, 1000);
 
         let start = Instant::now();
         for _ in 0..iterations_per_step {
@@ -133,7 +150,7 @@ fn main() -> miette::Result<()> {
         .unwrap();
         queue!(stdout, Print(format!("Elapsed: {:>10?}\r\n", elapsed))).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(10).saturating_sub(elapsed));
+        std::thread::sleep(std::time::Duration::from_millis(step_ms as u64).saturating_sub(elapsed));
         iteration += iterations_per_step;
     }
 
