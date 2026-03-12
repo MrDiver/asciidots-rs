@@ -14,6 +14,8 @@ pub enum DiagnosticKind {
     MissingOpeningBrace,
     MissingClosingBrace,
     ConditionPathMissing,
+    InvalidPrintingModifier,
+    MismatchingQuotes,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -96,7 +98,7 @@ impl Lexer {
             '/' => Ok(Token::Mirror(MirrorKind::Forward)),
             '\\' => Ok(Token::Mirror(MirrorKind::Backward)),
             '[' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
-                Some(']') => Ok(Token::OperatorBegin),
+                Some(']') => Ok(Token::OperatorBegin(Orientation::Vertical)),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -105,7 +107,7 @@ impl Lexer {
                 )),
             },
             ']' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
-                Some('[') => Ok(Token::OperatorEnd),
+                Some('[') => Ok(Token::OperatorEnd(Orientation::Vertical)),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -114,7 +116,7 @@ impl Lexer {
                 )),
             },
             '{' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
-                Some('}') => Ok(Token::OperatorBegin),
+                Some('}') => Ok(Token::OperatorBegin(Orientation::Horizontal)),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -123,7 +125,7 @@ impl Lexer {
                 )),
             },
             '}' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
-                Some('{') => Ok(Token::OperatorEnd),
+                Some('{') => Ok(Token::OperatorEnd(Orientation::Horizontal)),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -149,6 +151,7 @@ impl Lexer {
             },
             '!' => Ok(Token::Negate),
             '"' => Ok(Token::Quote),
+            '\'' => Ok(Token::QuoteStream),
             ':' => Ok(Token::Filter(false)),
             ';' => Ok(Token::Filter(true)),
             c => {

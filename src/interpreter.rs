@@ -3,39 +3,50 @@ use crate::dot::{Dot, Position};
 use crate::parser::DiagnosticKind;
 use crate::token::{Direction, MirrorKind, Orientation, Token};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum SetKind {
     Id,
     Value,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum MachineEvent {
     Nothing,
     Died,
     EndProgram,
     HitOperator,
+    PrintLn(String),
+    Print(String),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct TravelState;
-#[derive(Debug, Copy, Clone)]
+
+#[derive(Debug, Clone)]
 pub struct SetState {
     kind: SetKind,
     acc: u64,
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct DeadState;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct WaitingState;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
+pub struct PrintingState {
+    inside_quote: bool,
+    streaming: bool,
+    accumulator: String,
+}
+
+#[derive(Debug, Clone)]
 pub enum MachineState {
     Travel(TravelState),
     Set(SetState),
     Dead(DeadState),
     Waiting(WaitingState),
+    Printing(PrintingState),
 }
 
 impl MachineState {
@@ -53,6 +64,14 @@ impl MachineState {
 
     fn waiting() -> Self {
         MachineState::Waiting(WaitingState)
+    }
+
+    fn printing() -> MachineState {
+        MachineState::Printing(PrintingState {
+            accumulator: String::default(),
+            streaming: false,
+            inside_quote: false,
+        })
     }
 }
 
@@ -124,26 +143,36 @@ impl DotMachine {
             MachineState::Travel(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Set(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Waiting(s) => s.process(&mut self.dot, &token, pending_dots),
-            _ => Ok(MachineEvent::Nothing),
+            MachineState::Printing(s) => s.process(&mut self.dot, &token, pending_dots),
+            MachineState::Dead(_) => Ok(MachineEvent::Nothing),
         }
     }
 
     pub fn next(&mut self, event: &MachineEvent, lookahead: &Token) {
         self.state = match event {
-            MachineEvent::Nothing => match &mut self.state {
-                MachineState::Travel(s) => s.next(&mut self.dot, &lookahead),
-                MachineState::Set(s) => s.next(&mut self.dot, &lookahead),
-                MachineState::Waiting(s) => s.next(&mut self.dot, &lookahead),
-                MachineState::Dead(_) => self.state,
-            },
             MachineEvent::Died => MachineState::dead(),
             MachineEvent::EndProgram => MachineState::dead(),
             MachineEvent::HitOperator => MachineState::waiting(),
+            MachineEvent::Nothing | MachineEvent::PrintLn(_) | MachineEvent::Print(_) => {
+                match &mut self.state {
+                    MachineState::Travel(s) => s.next(&mut self.dot, &lookahead),
+                    MachineState::Set(s) => s.next(&mut self.dot, &lookahead),
+                    MachineState::Waiting(s) => s.next(&mut self.dot, &lookahead),
+                    MachineState::Printing(s) => s.next(&mut self.dot, &lookahead),
+                    MachineState::Dead(_) => self.state.clone(),
+                }
+            }
         };
     }
 }
 
 impl std::fmt::Display for DotMachine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Dot({:?} {:.2})", self.position(), self.dot.value,)
+    }
+}
+
+impl std::fmt::Debug for DotMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -154,12 +183,6 @@ impl std::fmt::Display for DotMachine {
             self.dot.value,
             self.is_dead()
         )
-    }
-}
-
-impl std::fmt::Debug for DotMachine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
     }
 }
 
@@ -224,7 +247,7 @@ impl MachineStateExecutor for TravelState {
             Token::Digit(_) | Token::Char(_) => {
                 dot.step();
             }
-            Token::OperatorBegin | Token::OperatorEnd
+            Token::OperatorBegin(_) | Token::OperatorEnd(_)
                 if matches!(dot.orientation(), Orientation::Horizontal) =>
             {
                 dot.step();
@@ -242,6 +265,7 @@ impl MachineStateExecutor for TravelState {
         match *token {
             Token::Empty => MachineState::dead(),
             Token::ValueMarker => MachineState::set(SetKind::Value),
+            Token::Write => MachineState::printing(),
             _ => MachineState::travel(),
         }
     }
@@ -268,7 +292,7 @@ impl MachineStateExecutor for SetState {
 
     fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
         match *token {
-            Token::Digit(_) => MachineState::Set(*self),
+            Token::Digit(_) => MachineState::Set(self.clone()),
             _ => {
                 match self.kind {
                     SetKind::Value => dot.set_value(self.acc as f64),
@@ -280,20 +304,98 @@ impl MachineStateExecutor for SetState {
     }
 }
 
-
 impl MachineStateExecutor for WaitingState {
-    fn process(&mut self, dot: &mut Dot, token: &Token, pending_dots: &mut Vec<DotMachine>) -> Result<MachineEvent, DiagnosticKind> {
-        match *token{
-            Token::OperatorBegin | Token::OperatorEnd | Token::Operator{..} => { dot.step();}
-            _ => {unreachable!("This should have never happened")}
+    fn process(
+        &mut self,
+        dot: &mut Dot,
+        token: &Token,
+        pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, DiagnosticKind> {
+        match *token {
+            Token::OperatorBegin(_) | Token::OperatorEnd(_) | Token::Operator { .. } => {
+                dot.step();
+            }
+            _ => {
+                unreachable!("This should have never happened")
+            }
         };
         Ok(MachineEvent::Nothing)
     }
 
     fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
-        match token{
-            Token::OperatorBegin | Token::OperatorEnd => MachineState::waiting(),
-            _ => MachineState::travel()
+        match token {
+            Token::OperatorBegin(_) | Token::OperatorEnd(_) => MachineState::waiting(),
+            _ => MachineState::travel(),
+        }
+    }
+}
+
+impl MachineStateExecutor for PrintingState {
+    fn process(
+        &mut self,
+        dot: &mut Dot,
+        token: &Token,
+        pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, DiagnosticKind> {
+        if self.inside_quote {
+            dot.step();
+            match *token {
+                Token::Quote => {
+                    self.inside_quote = false;
+                    return Ok(MachineEvent::PrintLn(self.accumulator.clone()));
+                }
+                _ => {}
+            }
+            self.accumulator.push_str(format!("{}", token).as_str());
+            return Ok(MachineEvent::Nothing);
+        } else if self.streaming {
+            dot.step();
+            match *token {
+                Token::QuoteStream => {
+                    self.streaming = false;
+                    return Ok(MachineEvent::PrintLn(String::new()));
+                }
+                _ => {}
+            }
+            let char = format!("{}", token);
+            return Ok(MachineEvent::Print(char));
+        }
+        match *token {
+            Token::Write => {
+                dot.step();
+            }
+            Token::ValueMarker => {
+                dot.step();
+                return Ok(MachineEvent::PrintLn(format!("{}", dot.value)));
+            }
+            Token::IdMarker => {
+                dot.step();
+                return Ok(MachineEvent::PrintLn(format!("{}", dot.id)));
+            }
+            Token::QuoteStream => {
+                dot.step();
+                self.streaming = true;
+            }
+            Token::Quote => {
+                dot.step();
+                self.inside_quote = true;
+            }
+            _ => return Err(DiagnosticKind::InvalidPrintingModifier),
+        };
+        Ok(MachineEvent::Nothing)
+    }
+
+    fn next(&mut self, _dot: &mut Dot, token: &Token) -> MachineState {
+        if self.inside_quote || self.streaming {
+            MachineState::Printing(self.clone()) // TODO: Fix the cloning thing here by
+        // making next consume
+        } else {
+            match *token {
+                Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::IdMarker => {
+                    MachineState::Printing(self.clone())
+                }
+                _ => MachineState::travel(),
+            }
         }
     }
 }

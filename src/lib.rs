@@ -46,7 +46,8 @@ impl AsciiField {
     }
 }
 
-struct OperatorQueues {
+#[derive(Debug)]
+pub struct OperatorQueues {
     orientation: Orientation,
     op: char,
     horizontal: VecDeque<DotMachine>,
@@ -73,8 +74,8 @@ impl OperatorQueues {
     fn get_result(&mut self) -> Option<DotMachine> {
         if self.horizontal.len() > 0 && self.vertical.len() > 0 {
             let (mut primary, secondary) = {
-                let doth = self.horizontal.pop_back().unwrap();
-                let dotv = self.vertical.pop_back().unwrap();
+                let doth = self.horizontal.pop_front().unwrap();
+                let dotv = self.vertical.pop_front().unwrap();
                 if matches!(self.orientation, Orientation::Horizontal) {
                     (doth, dotv)
                 } else {
@@ -106,6 +107,7 @@ pub struct ProgramState {
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<Diagnostic>,
     operator_map: FxHashMap<(usize, usize), OperatorQueues>,
+    output: String,
 }
 
 impl ProgramState {
@@ -117,6 +119,7 @@ impl ProgramState {
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
             operator_map: FxHashMap::default(),
+            output: String::with_capacity(128),
         };
         state.initalize();
         Ok(state)
@@ -202,6 +205,16 @@ impl ProgramState {
 
                     repeat_iteration = true;
                 }
+                MachineEvent::PrintLn(s) => {
+                    self.output.push_str(format!("{}\n", s).as_str());
+                    let lookahead = self.field.at(dot.position());
+                    dot.next(&MachineEvent::Nothing, &lookahead)
+                }
+                MachineEvent::Print(s) => {
+                    self.output.push_str(format!("{}", s).as_str());
+                    let lookahead = self.field.at(dot.position());
+                    dot.next(&MachineEvent::Nothing, &lookahead)
+                }
                 _ => {
                     let lookahead = self.field.at(dot.position());
                     dot.next(&event, &lookahead)
@@ -251,6 +264,14 @@ impl ProgramState {
 
     pub fn get_dots(&self) -> &[DotMachine] {
         &self.dots
+    }
+
+    pub fn queues(&self) -> &FxHashMap<(usize, usize), OperatorQueues> {
+        &self.operator_map
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
     }
 }
 

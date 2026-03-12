@@ -47,24 +47,25 @@ pub enum MirrorKind {
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Token {
     Empty,
-    Dot,                // .
-    Pipe(Orientation),  // - and |
-    Mirror(MirrorKind), // Forward / and Backward \
-    OperatorBegin,      // Horizontal { and Vertical [
+    Dot,                        // .
+    Pipe(Orientation),          // - and |
+    Mirror(MirrorKind),         // Forward / and Backward \
+    OperatorBegin(Orientation), // Horizontal { and Vertical [
     Operator {
         orientation: Orientation,
         repr: char,
     }, // Any char + - / * and so on
-    OperatorEnd,        // Horizontal } and Vertical ]
-    Reflector(MirrorKind), // Forward `(` and Backward `)`
-    ValueMarker,        // #
-    IdMarker,           // @
-    Read,               // ?
-    Write,              // $
-    Conditonal(bool),   // ~
-    Negate,             // ! Does nothing
-    Quote,              // "
-    Filter(bool),       // False : and True ;
+    OperatorEnd(Orientation),   // Horizontal } and Vertical ]
+    Reflector(MirrorKind),      // Forward `(` and Backward `)`
+    ValueMarker,                // #
+    IdMarker,                   // @
+    Read,                       // ?
+    Write,                      // $
+    Conditonal(bool),           // ~
+    Negate,                     // ! Does nothing
+    Quote,                      // "
+    QuoteStream,                // '
+    Filter(bool),               // False : and True ;
     // - Same char could be used as operator -
     CrossPipe,                 // Standalone +
     StopProgram,               // Standalone &
@@ -72,6 +73,50 @@ pub enum Token {
     Duplicate,                 // Standalone *
     Digit(u8),                 // Any digit 1-9
     Char(char),                // Any Char
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Empty => write!(f, " "),
+            Token::Dot => write!(f, "."),
+            Token::Pipe(Orientation::Horizontal) => write!(f, "-"),
+            Token::Pipe(Orientation::Vertical) => write!(f, "|"),
+            Token::Mirror(MirrorKind::Forward) => write!(f, "/"),
+            Token::Mirror(MirrorKind::Backward) => write!(f, "\\"),
+            Token::OperatorBegin(Orientation::Horizontal) => write!(f, "{{"),
+            Token::OperatorBegin(Orientation::Vertical) => write!(f, "["),
+            Token::Operator { repr, .. } => write!(f, "{}", repr),
+            Token::OperatorEnd(Orientation::Horizontal) => write!(f, "}}"),
+            Token::OperatorEnd(Orientation::Vertical) => write!(f, "]"),
+            Token::Reflector(MirrorKind::Forward) => write!(f, "("),
+            Token::Reflector(MirrorKind::Backward) => write!(f, ")"),
+            Token::ValueMarker => write!(f, "#"),
+            Token::IdMarker => write!(f, "@"),
+            Token::Read => write!(f, "?"),
+            Token::Write => write!(f, "$"),
+            Token::Conditonal(_) => write!(f, "~"),
+            Token::Negate => write!(f, "!"),
+            Token::Quote => write!(f, "\""),
+            Token::QuoteStream => write!(f, "'"),
+            Token::Filter(b) => {
+                if *b {
+                    write!(f, ";")
+                } else {
+                    write!(f, ":")
+                }
+            }
+            Token::CrossPipe => write!(f, "+"),
+            Token::StopProgram => write!(f, "&"),
+            Token::ForceDirection(Direction::Up) => write!(f, "^"),
+            Token::ForceDirection(Direction::Down) => write!(f, "v"),
+            Token::ForceDirection(Direction::Left) => write!(f, "<"),
+            Token::ForceDirection(Direction::Right) => write!(f, ">"),
+            Token::Duplicate => write!(f, "*"),
+            Token::Digit(d) => write!(f, "{}", d),
+            Token::Char(c) => write!(f, "{}", c),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

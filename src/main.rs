@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::error::Error;
-use std::fs;
 use std::io::{BufWriter, Write, stdout};
 use std::path::PathBuf;
 use std::time::Instant;
+use std::{fs, iter};
 
 use AsciidotsCompiler::dot::Dot;
 use AsciidotsCompiler::interpreter::DotMachine;
@@ -25,6 +25,9 @@ struct Args {
     /// Delay between rendered frames in milliseconds (default: 100)
     #[arg(long, default_value_t = 100)]
     ms: u64,
+
+    #[arg(long, default_value_t = false)]
+    paused: bool,
 }
 
 #[derive(Debug, miette::Diagnostic)]
@@ -110,7 +113,7 @@ fn main() -> miette::Result<()> {
     let mut iteration = 0;
     let mut iterations_per_step = 1;
     let mut step_ms = args.ms as i64;
-    let mut running = true;
+    let mut running = !args.paused;
     // Print loop
     while program.num_dots() > 0 {
         if event::poll(std::time::Duration::from_millis(16)).unwrap()
@@ -123,13 +126,23 @@ fn main() -> miette::Result<()> {
                 KeyCode::Char('a') => step_ms -= 10,
                 KeyCode::Char('d') => step_ms += 10,
                 KeyCode::Char(' ') => running = !running,
+                KeyCode::Char('r') => {
+                    for _ in 0..iterations_per_step {
+                        if let Err(d) = program.step() {
+                            return Err(miette::Report::new(ProgramDiagnostics {
+                                diagnostics: Vec::from(d),
+                            }));
+                        }
+                    }
+                    iteration += iterations_per_step;
+                }
                 _ => {}
             }
         }
         if iterations_per_step < 1 {
             iterations_per_step = 1;
         }
-        step_ms = step_ms.clamp(1, 1000);
+        step_ms = step_ms.clamp(0, 1000);
 
         let start = Instant::now();
         if running {
@@ -157,13 +170,34 @@ fn main() -> miette::Result<()> {
         .unwrap();
         queue!(stdout, Print(format!("Elapsed: {:>10?}\r\n", elapsed))).unwrap();
         for dot in program.get_dots() {
-            queue!(stdout, Print(format!("{}\r\n", dot))).unwrap();
+            queue!(stdout, Print(format!("{:?}\r\n", dot))).unwrap();
         }
+        // for queue in program.queues() {
+        //     queue!(stdout, Print(format!("{:?}\r\n", queue.1))).unwrap();
+        // }
+        let skip_elements = program.output().lines().count().saturating_sub(10);
+        queue!(
+            stdout,
+            Print(
+                program
+                    .output()
+                    .lines()
+                    .into_iter()
+                    .skip(skip_elements)
+                    .flat_map(|s| [s, "\r\n"])
+                    .collect::<String>()
+            )
+        )
+        .unwrap();
 
-        std::thread::sleep(
-            std::time::Duration::from_millis(step_ms as u64).saturating_sub(elapsed),
-        );
-        iteration += iterations_per_step;
+        if step_ms > 0 {
+            std::thread::sleep(
+                std::time::Duration::from_millis(step_ms as u64).saturating_sub(elapsed),
+            );
+        }
+        if running {
+            iteration += iterations_per_step;
+        }
     }
 
     execute!(stdout, LeaveAlternateScreen).unwrap();
