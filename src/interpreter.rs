@@ -14,6 +14,7 @@ pub enum MachineEvent {
     Nothing,
     Died,
     EndProgram,
+    HitOperator,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -27,10 +28,14 @@ pub struct SetState {
 pub struct DeadState;
 
 #[derive(Debug, Copy, Clone)]
+pub struct WaitingState;
+
+#[derive(Debug, Copy, Clone)]
 pub enum MachineState {
     Travel(TravelState),
     Set(SetState),
     Dead(DeadState),
+    Waiting(WaitingState),
 }
 
 impl MachineState {
@@ -44,6 +49,10 @@ impl MachineState {
 
     fn dead() -> Self {
         MachineState::Dead(DeadState)
+    }
+
+    fn waiting() -> Self {
+        MachineState::Waiting(WaitingState)
     }
 }
 
@@ -78,12 +87,32 @@ impl DotMachine {
         }
     }
 
+    pub fn with_state(dot: Dot, state: MachineState) -> Self {
+        Self { dot, state }
+    }
+
     pub fn is_dead(&self) -> bool {
         matches!(self.state, MachineState::Dead(_))
     }
 
     pub fn position(&self) -> &Position {
         &self.dot.position
+    }
+
+    pub fn direction(&self) -> &Direction {
+        &self.dot.direction
+    }
+
+    pub fn value(&self) -> f64 {
+        self.dot.value
+    }
+
+    pub fn dot(&self) -> Dot {
+        self.dot
+    }
+
+    pub fn replace_dot(&mut self, dot: Dot) {
+        self.dot = dot;
     }
 
     pub fn run(
@@ -94,6 +123,7 @@ impl DotMachine {
         match &mut self.state {
             MachineState::Travel(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Set(s) => s.process(&mut self.dot, &token, pending_dots),
+            MachineState::Waiting(s) => s.process(&mut self.dot, &token, pending_dots),
             _ => Ok(MachineEvent::Nothing),
         }
     }
@@ -103,10 +133,12 @@ impl DotMachine {
             MachineEvent::Nothing => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, &lookahead),
                 MachineState::Set(s) => s.next(&mut self.dot, &lookahead),
-                MachineState::Dead(_) => MachineState::dead(),
+                MachineState::Waiting(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::Dead(_) => self.state,
             },
             MachineEvent::Died => MachineState::dead(),
             MachineEvent::EndProgram => MachineState::dead(),
+            MachineEvent::HitOperator => MachineState::waiting(),
         };
     }
 }
@@ -189,9 +221,17 @@ impl MachineStateExecutor for TravelState {
                 // original dot keeps going forward
                 dot.step();
             }
-            // Pass these without dying
             Token::Digit(_) | Token::Char(_) => {
                 dot.step();
+            }
+            Token::OperatorBegin | Token::OperatorEnd
+                if matches!(dot.orientation(), Orientation::Horizontal) =>
+            {
+                dot.step();
+                return Ok(MachineEvent::HitOperator);
+            }
+            Token::Operator { .. } => {
+                return Ok(MachineEvent::HitOperator);
             }
             _ => return Ok(MachineEvent::Died),
         };
@@ -236,6 +276,24 @@ impl MachineStateExecutor for SetState {
                 };
                 MachineState::travel()
             }
+        }
+    }
+}
+
+
+impl MachineStateExecutor for WaitingState {
+    fn process(&mut self, dot: &mut Dot, token: &Token, pending_dots: &mut Vec<DotMachine>) -> Result<MachineEvent, DiagnosticKind> {
+        match *token{
+            Token::OperatorBegin | Token::OperatorEnd | Token::Operator{..} => { dot.step();}
+            _ => {unreachable!("This should have never happened")}
+        };
+        Ok(MachineEvent::Nothing)
+    }
+
+    fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
+        match token{
+            Token::OperatorBegin | Token::OperatorEnd => MachineState::waiting(),
+            _ => MachineState::travel()
         }
     }
 }

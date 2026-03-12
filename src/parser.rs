@@ -61,7 +61,7 @@ impl Lexer {
         }
     }
 
-    fn is_operator(&self, x: usize, y: usize) -> bool {
+    fn get_operator(&self, x: usize, y: usize) -> Option<Orientation> {
         if let Some('[') = self
             .grid
             .get(y)
@@ -71,9 +71,20 @@ impl Lexer {
                 .get(y)
                 .and_then(|row| row.get(x.overflowing_add(1).0))
         {
-            return true;
+            Some(Orientation::Vertical)
+        } else if let Some('{') = self
+            .grid
+            .get(y)
+            .and_then(|row| row.get(x.overflowing_sub(1).0))
+            && let Some('}') = self
+                .grid
+                .get(y)
+                .and_then(|row| row.get(x.overflowing_add(1).0))
+        {
+            Some(Orientation::Horizontal)
+        } else {
+            None
         }
-        false
     }
 
     fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, Diagnostic> {
@@ -85,7 +96,7 @@ impl Lexer {
             '/' => Ok(Token::Mirror(MirrorKind::Forward)),
             '\\' => Ok(Token::Mirror(MirrorKind::Backward)),
             '[' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
-                Some(']') => Ok(Token::OperatorBegin(Orientation::Vertical)),
+                Some(']') => Ok(Token::OperatorBegin),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -94,7 +105,7 @@ impl Lexer {
                 )),
             },
             ']' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
-                Some('[') => Ok(Token::OperatorEnd(Orientation::Vertical)),
+                Some('[') => Ok(Token::OperatorEnd),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -103,7 +114,7 @@ impl Lexer {
                 )),
             },
             '{' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
-                Some('}') => Ok(Token::OperatorBegin(Orientation::Horizontal)),
+                Some('}') => Ok(Token::OperatorBegin),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -112,7 +123,7 @@ impl Lexer {
                 )),
             },
             '}' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
-                Some('{') => Ok(Token::OperatorEnd(Orientation::Horizontal)),
+                Some('{') => Ok(Token::OperatorEnd),
                 _ => Err(Diagnostic::new(
                     x,
                     y,
@@ -141,9 +152,11 @@ impl Lexer {
             ':' => Ok(Token::Filter(false)),
             ';' => Ok(Token::Filter(true)),
             c => {
-                if self.is_operator(x, y) {
-                    Ok(Token::Operator(c)) // TODO: Could be refactored to static operators but
-                // right now unnecessary
+                if let Some(orientation) = self.get_operator(x, y) {
+                    Ok(Token::Operator {
+                        orientation,
+                        repr: c,
+                    })
                 } else {
                     match c {
                         '>' => Ok(Token::ForceDirection(Direction::Right)),

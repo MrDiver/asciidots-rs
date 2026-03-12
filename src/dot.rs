@@ -51,6 +51,18 @@ impl From<Position> for Option<Direction> {
     }
 }
 
+impl From<Position> for (usize, usize) {
+    fn from(value: Position) -> Self {
+        (value.x as usize, value.y as usize)
+    }
+}
+
+impl From<&Position> for (usize, usize) {
+    fn from(value: &Position) -> Self {
+        (value.x as usize, value.y as usize)
+    }
+}
+
 impl Add for Position {
     type Output = Position;
 

@@ -83,7 +83,7 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
 fn make_initialized_program(source: &str) -> ProgramState {
     let mut program = ProgramState::from_string(source)
         .expect("program parsing should succeed for benchmark input");
-    program.initalize_dots();
+    program.initalize();
     program
 }
 

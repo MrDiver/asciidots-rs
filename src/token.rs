@@ -47,21 +47,24 @@ pub enum MirrorKind {
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum Token {
     Empty,
-    Dot,                        // .
-    Pipe(Orientation),          // - and |
-    Mirror(MirrorKind),         // Forward / and Backward \
-    OperatorBegin(Orientation), // Horizontal { and Vertical [
-    Operator(char),             // Any char + - / * and so on
-    OperatorEnd(Orientation),   // Horizontal } and Vertical ]
-    Reflector(MirrorKind),      // Forward `(` and Backward `)`
-    ValueMarker,                // #
-    IdMarker,                   // @
-    Read,                       // ?
-    Write,                      // $
-    Conditonal(bool),           // ~
-    Negate,                     // ! Does nothing
-    Quote,                      // "
-    Filter(bool),               // False : and True ;
+    Dot,                // .
+    Pipe(Orientation),  // - and |
+    Mirror(MirrorKind), // Forward / and Backward \
+    OperatorBegin,      // Horizontal { and Vertical [
+    Operator {
+        orientation: Orientation,
+        repr: char,
+    }, // Any char + - / * and so on
+    OperatorEnd,        // Horizontal } and Vertical ]
+    Reflector(MirrorKind), // Forward `(` and Backward `)`
+    ValueMarker,        // #
+    IdMarker,           // @
+    Read,               // ?
+    Write,              // $
+    Conditonal(bool),   // ~
+    Negate,             // ! Does nothing
+    Quote,              // "
+    Filter(bool),       // False : and True ;
     // - Same char could be used as operator -
     CrossPipe,                 // Standalone +
     StopProgram,               // Standalone &

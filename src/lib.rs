@@ -6,11 +6,14 @@ pub mod token;
 
 use std::collections::VecDeque;
 
+use rustc_hash::FxHashMap;
+
+use crate::interpreter::MachineState;
 use crate::{
     dot::{Dot, Position},
-    interpreter::{DotMachine, MachineEvent, MachineState},
+    interpreter::{DotMachine, MachineEvent},
     parser::{Diagnostic, Lexer, Severity},
-    token::{Direction, SpanToken, Token},
+    token::{Direction, Orientation, SpanToken, Token},
 };
 
 pub type TokenField = Vec<Vec<SpanToken>>;
@@ -43,9 +46,58 @@ impl AsciiField {
     }
 }
 
-struct OperatorQueues<'a> {
-    horizontal: VecDeque<&'a DotMachine>,
-    vertical: VecDeque<&'a DotMachine>,
+struct OperatorQueues {
+    orientation: Orientation,
+    op: char,
+    horizontal: VecDeque<DotMachine>,
+    vertical: VecDeque<DotMachine>,
+}
+
+impl OperatorQueues {
+    fn new(orientation: Orientation, op: char) -> Self {
+        Self {
+            orientation,
+            op,
+            horizontal: VecDeque::with_capacity(1),
+            vertical: VecDeque::with_capacity(1),
+        }
+    }
+
+    fn push(&mut self, dot: DotMachine) {
+        match dot.direction().orientation() {
+            Orientation::Horizontal => self.horizontal.push_back(dot),
+            Orientation::Vertical => self.vertical.push_back(dot),
+        }
+    }
+
+    fn get_result(&mut self) -> Option<DotMachine> {
+        if self.horizontal.len() > 0 && self.vertical.len() > 0 {
+            let (mut primary, secondary) = {
+                let doth = self.horizontal.pop_back().unwrap();
+                let dotv = self.vertical.pop_back().unwrap();
+                if matches!(self.orientation, Orientation::Horizontal) {
+                    (doth, dotv)
+                } else {
+                    (dotv, doth)
+                }
+            };
+
+            let a = primary.value();
+            let b = secondary.value();
+            let new_val = match self.op {
+                '+' => a + b,
+                '-' => a - b,
+                '*' => a * b,
+                '/' => a / b,
+                _ => a,
+            };
+            let mut new_dot = primary.dot();
+            new_dot.set_value(new_val);
+            primary.replace_dot(new_dot);
+            return Some(primary);
+        }
+        None
+    }
 }
 
 pub struct ProgramState {
@@ -53,6 +105,7 @@ pub struct ProgramState {
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<Diagnostic>,
+    operator_map: FxHashMap<(usize, usize), OperatorQueues>,
 }
 
 impl ProgramState {
@@ -63,6 +116,7 @@ impl ProgramState {
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
+            operator_map: FxHashMap::default(),
         };
         state.initalize();
         Ok(state)
@@ -76,32 +130,44 @@ impl ProgramState {
         for row in self.field.get_field() {
             for token in row {
                 let position = Position::new(token.col() as i32, token.line() as i32);
-                if let Token::Dot = token.inner() {
-                    for direction in &[
-                        Direction::Up,
-                        Direction::Down,
-                        Direction::Left,
-                        Direction::Right,
-                    ] {
-                        let offsetpos = position + (*direction).into();
-                        if let Token::Pipe(orientation) = self.field.at(&offsetpos)
-                            && orientation == direction.orientation()
-                        {
-                            self.dots.push(DotMachine::new(
-                                *direction,
-                                token.col() as i32,
-                                token.line() as i32,
-                            ));
-                            break; // Only one dot per position, so break after finding the first valid direction
+                match *token.inner() {
+                    Token::Dot => {
+                        for direction in &[
+                            Direction::Up,
+                            Direction::Down,
+                            Direction::Left,
+                            Direction::Right,
+                        ] {
+                            let offsetpos = position + (*direction).into();
+                            if let Token::Pipe(orientation) = self.field.at(&offsetpos)
+                                && orientation == direction.orientation()
+                            {
+                                self.dots.push(DotMachine::new(
+                                    *direction,
+                                    token.col() as i32,
+                                    token.line() as i32,
+                                ));
+                                break; // Only one dot per position, so break after finding the first valid direction
+                            }
                         }
                     }
+                    Token::Operator { orientation, repr } => {
+                        self.operator_map.insert(
+                            (token.col(), token.line()),
+                            OperatorQueues::new(orientation, repr),
+                        );
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
     fn interpret(&mut self) {
-        for dot in self.dots.iter_mut() {
+        let mut i = 0;
+        let mut repeat_iteration = false;
+        while i < self.dots.len() {
+            let dot = &mut self.dots[i];
             let token = &self.field.at(dot.position());
             let event = match dot.run(token, &mut self.pending_dots) {
                 Ok(e) => e,
@@ -121,10 +187,30 @@ impl ProgramState {
                     self.dots.clear();
                     return;
                 }
+                MachineEvent::HitOperator => {
+                    let mut dot = self.dots.swap_remove(i);
+                    dot.next(&event, &Token::Empty);
+                    let opqueue = self
+                        .operator_map
+                        .get_mut(&(dot.position().into()))
+                        .unwrap_or_else(|| unreachable!());
+                    opqueue.push(dot);
+                    // Add a result dot back to the running loop
+                    if let Some(dot) = opqueue.get_result() {
+                        self.dots.push(dot)
+                    }
+
+                    repeat_iteration = true;
+                }
                 _ => {
                     let lookahead = self.field.at(dot.position());
                     dot.next(&event, &lookahead)
                 }
+            }
+            if !repeat_iteration {
+                i += 1;
+            } else {
+                repeat_iteration = false;
             }
         }
     }
@@ -161,7 +247,7 @@ impl ProgramState {
 
     pub fn num_dots(&self) -> usize {
         self.dots.len()
-    }
+    } // TODO: Investigate if it needs counting the operator dots
 
     pub fn get_dots(&self) -> &[DotMachine] {
         &self.dots
