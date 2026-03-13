@@ -1,8 +1,8 @@
-use AsciidotsCompiler::dot::{Dot, Position};
-use AsciidotsCompiler::interpreter::{self, DotMachine};
-use AsciidotsCompiler::parser::Lexer;
-use AsciidotsCompiler::token::{Direction, Token};
-use AsciidotsCompiler::{AsciiField, ProgramState};
+use asciidots_core::dot::{Dot, Position};
+use asciidots_core::interpreter::{AsciiField, ProgramState};
+use asciidots_core::parser::Lexer;
+use asciidots_core::state_machine::DotMachine;
+use asciidots_core::token::{Direction, Token};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -83,7 +83,6 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
 fn make_initialized_program(source: &str) -> ProgramState {
     let mut program = ProgramState::from_string(source)
         .expect("program parsing should succeed for benchmark input");
-    program.initalize();
     program
 }
 

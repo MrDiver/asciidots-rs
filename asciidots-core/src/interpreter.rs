@@ -1,18 +1,13 @@
-pub mod dot;
-pub mod interpreter;
-pub mod parser;
-pub mod state;
-pub mod token;
-
 use std::collections::VecDeque;
 
+use miette::{Diagnostic, SourceSpan};
 use rustc_hash::FxHashMap;
+use thiserror::Error;
 
-use crate::interpreter::MachineState;
 use crate::{
-    dot::{Dot, Position},
-    interpreter::{DotMachine, MachineEvent},
-    parser::{Diagnostic, Lexer, Severity},
+    dot::Position,
+    parser::{LexErrors, Lexer},
+    state_machine::{DotMachine, MachineEvent},
     token::{Direction, Orientation, SpanToken, Token},
 };
 
@@ -21,15 +16,19 @@ pub type TokenField = Vec<Vec<SpanToken>>;
 #[derive(Debug)]
 pub struct AsciiField {
     field: TokenField,
+    offsets: Vec<Vec<usize>>,
 }
 
 impl AsciiField {
-    pub fn from_string(content: &str) -> Result<Self, Vec<Diagnostic>> {
-        let field: Vec<Vec<char>> = content.lines().map(|line| line.chars().collect()).collect();
-        let mut lexer = Lexer::new(field.clone());
+    pub fn from_string(content: &str) -> Result<Self, LexErrors> {
+        let mut lexer = Lexer::new(content.into());
         lexer.run();
+        let offsets = lexer.offsets();
         let field = lexer.finish()?;
-        Ok(AsciiField { field })
+        Ok(AsciiField {
+            field,
+            offsets: offsets,
+        })
     }
 
     pub fn get_field(&self) -> &TokenField {
@@ -43,6 +42,10 @@ impl AsciiField {
             .and_then(|row| row.get(x as usize))
             .map(|token| *token.inner())
             .unwrap_or_else(|| Token::Empty)
+    }
+
+    pub fn offset(&self, position: &Position) -> usize {
+        self.offsets[position.y as usize][position.x as usize]
     }
 }
 
@@ -101,17 +104,36 @@ impl OperatorQueues {
     }
 }
 
+#[derive(Error, Debug, Diagnostic)]
+#[error("The Program died Unexpectedly")]
+pub enum RuntimeError {
+    None,
+    #[error("The printing modifier encountered is invalid {}", char::from(*invalid))]
+    #[diagnostic(help("Try: one of @, #, \"...\" or '...' "))]
+    InvalidPrintingModifier {
+        invalid: Token,
+        #[label("this here")]
+        span: SourceSpan,
+    },
+}
+
+impl RuntimeError {
+    pub fn invalid_printing_modifier(invalid: Token, span: SourceSpan) -> Self {
+        RuntimeError::InvalidPrintingModifier { invalid, span }
+    }
+}
+
 pub struct ProgramState {
     field: AsciiField,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
-    diagnostics: Vec<Diagnostic>,
+    diagnostics: Vec<RuntimeError>,
     operator_map: FxHashMap<(usize, usize), OperatorQueues>,
     output: String,
 }
 
 impl ProgramState {
-    pub fn from_string(content: &str) -> Result<Self, Vec<Diagnostic>> {
+    pub fn from_string(content: &str) -> Result<Self, LexErrors> {
         let field = AsciiField::from_string(content)?;
         let mut state = ProgramState {
             field,
@@ -176,12 +198,8 @@ impl ProgramState {
                 Ok(e) => e,
                 Err(d) => {
                     let Position { x, y } = dot.position();
-                    self.diagnostics.push(Diagnostic::new(
-                        *x as usize,
-                        *y as usize,
-                        d,
-                        Severity::Error,
-                    ));
+                    self.diagnostics.push(RuntimeError::None); // TODO: implement the error
+                    // handling
                     MachineEvent::EndProgram
                 }
             };
@@ -239,7 +257,7 @@ impl ProgramState {
         }
     }
 
-    pub fn step(&mut self) -> Result<(), &[Diagnostic]> {
+    pub fn step(&mut self) -> Result<(), &[RuntimeError]> {
         // 1. Step all Dots
         self.interpret();
 

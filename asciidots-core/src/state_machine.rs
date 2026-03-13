@@ -1,6 +1,4 @@
-use crate::AsciiField;
 use crate::dot::{Dot, Position};
-use crate::parser::DiagnosticKind;
 use crate::token::{Direction, MirrorKind, Orientation, Token};
 
 #[derive(Debug, Clone)]
@@ -75,13 +73,17 @@ impl MachineState {
     }
 }
 
+pub enum RuntimeErrorKind {
+    InvalidPrintingModifier(Token),
+}
+
 pub trait MachineStateExecutor {
     fn process(
         &mut self,
         dot: &mut Dot,
         token: &Token,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind>;
+    ) -> Result<MachineEvent, RuntimeErrorKind>;
     fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState;
 }
 
@@ -138,7 +140,7 @@ impl DotMachine {
         &mut self,
         token: &Token,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind> {
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
         match &mut self.state {
             MachineState::Travel(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Set(s) => s.process(&mut self.dot, &token, pending_dots),
@@ -192,7 +194,7 @@ impl MachineStateExecutor for TravelState {
         dot: &mut Dot,
         token: &Token,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind> {
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
         match *token {
             Token::Dot => {
                 dot.step();
@@ -277,7 +279,7 @@ impl MachineStateExecutor for SetState {
         dot: &mut Dot,
         token: &Token,
         _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind> {
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
         match *token {
             Token::Digit(d) => {
                 self.acc = self.acc * 10 + d as u64;
@@ -309,8 +311,8 @@ impl MachineStateExecutor for WaitingState {
         &mut self,
         dot: &mut Dot,
         token: &Token,
-        pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind> {
+        _pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
         match *token {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) | Token::Operator { .. } => {
                 dot.step();
@@ -322,7 +324,7 @@ impl MachineStateExecutor for WaitingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
+    fn next(&mut self, _dot: &mut Dot, token: &Token) -> MachineState {
         match token {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) => MachineState::waiting(),
             _ => MachineState::travel(),
@@ -335,8 +337,8 @@ impl MachineStateExecutor for PrintingState {
         &mut self,
         dot: &mut Dot,
         token: &Token,
-        pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, DiagnosticKind> {
+        _pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
         if self.inside_quote {
             dot.step();
             match *token {
@@ -380,7 +382,7 @@ impl MachineStateExecutor for PrintingState {
                 dot.step();
                 self.inside_quote = true;
             }
-            _ => return Err(DiagnosticKind::InvalidPrintingModifier),
+            c => return Err(RuntimeErrorKind::InvalidPrintingModifier(c)),
         };
         Ok(MachineEvent::Nothing)
     }

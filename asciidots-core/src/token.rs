@@ -119,6 +119,50 @@ impl std::fmt::Display for Token {
     }
 }
 
+impl From<Token> for char {
+    fn from(value: Token) -> Self {
+        match value {
+            Token::Empty => ' ',
+            Token::Dot => '.',
+            Token::Pipe(Orientation::Horizontal) => '-',
+            Token::Pipe(Orientation::Vertical) => '|',
+            Token::Mirror(MirrorKind::Forward) => '/',
+            Token::Mirror(MirrorKind::Backward) => '\\',
+            Token::OperatorBegin(Orientation::Horizontal) => '{',
+            Token::OperatorBegin(Orientation::Vertical) => '[',
+            Token::Operator { repr, .. } => repr,
+            Token::OperatorEnd(Orientation::Horizontal) => '}',
+            Token::OperatorEnd(Orientation::Vertical) => ']',
+            Token::Reflector(MirrorKind::Forward) => '(',
+            Token::Reflector(MirrorKind::Backward) => ')',
+            Token::ValueMarker => '#',
+            Token::IdMarker => '@',
+            Token::Read => '?',
+            Token::Write => '$',
+            Token::Conditonal(_) => '~',
+            Token::Negate => '!',
+            Token::Quote => '\"',
+            Token::QuoteStream => '\'',
+            Token::Filter(b) => {
+                if b {
+                    ';'
+                } else {
+                    ':'
+                }
+            }
+            Token::CrossPipe => '+',
+            Token::StopProgram => '&',
+            Token::ForceDirection(Direction::Up) => '^',
+            Token::ForceDirection(Direction::Down) => 'v',
+            Token::ForceDirection(Direction::Left) => '<',
+            Token::ForceDirection(Direction::Right) => '>',
+            Token::Duplicate => '*',
+            Token::Digit(d) => d.to_ascii_lowercase().into(),
+            Token::Char(c) => c,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct Spanned<T> {
     col: usize,

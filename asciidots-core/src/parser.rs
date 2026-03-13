@@ -1,50 +1,118 @@
 use crate::token::{Direction, MirrorKind, Orientation, SpanToken, Token};
+use miette::{Diagnostic, NamedSource, SourceSpan};
+use thiserror::Error;
 
-#[derive(Clone, Copy, Debug)]
-pub enum Severity {
-    Error,
-    Warn,
-    Info,
-    Hint,
+#[derive(Error, Debug, Diagnostic, Clone)]
+pub enum LexError {
+    #[error("missing opening brace for operator found '{ch_expected}' instead ")]
+    #[diagnostic(help("operators need braces: try '{expected_full}'"))]
+    MissingOpeningBrace {
+        ch_expected: char,
+        ch_found: char,
+        expected_full: String,
+        #[label("Expected '{ch_expected}' here")]
+        at_span: SourceSpan,
+        #[label("operator")]
+        op_span: SourceSpan,
+    },
+    #[error("missing closing brace for operator found '{ch_expected}' instead ")]
+    #[diagnostic(help("operators need braces: try '{expected_full}'"))]
+    MissingClosingBrace {
+        ch_expected: char,
+        ch_found: char,
+        expected_full: String,
+        #[label("Expected '{ch_expected}' here")]
+        at_span: SourceSpan,
+        #[label("operator")]
+        op_span: SourceSpan,
+    },
+    #[error("missing condition path (guaranteed deadlock)")]
+    #[diagnostic(help(""))]
+    MissingConditionalPath {
+        #[label("There needs to be a path here")]
+        at_span: SourceSpan,
+    },
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum DiagnosticKind {
-    Empty,
-    MissingOpeningBrace,
-    MissingClosingBrace,
-    ConditionPathMissing,
-    InvalidPrintingModifier,
-    MismatchingQuotes,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Diagnostic {
-    x: usize,
-    y: usize,
-    kind: DiagnosticKind,
-    severity: Severity,
-}
-
-impl Diagnostic {
-    pub fn new(x: usize, y: usize, kind: DiagnosticKind, severity: Severity) -> Self {
-        Self {
-            x,
-            y,
-            kind,
-            severity,
+impl LexError {
+    pub fn missing_opening_brace(
+        found: char,
+        at_span: SourceSpan,
+        op_span: SourceSpan,
+        orientation: Orientation,
+    ) -> Self {
+        LexError::MissingOpeningBrace {
+            ch_expected: Token::OperatorBegin(orientation).into(),
+            ch_found: found,
+            expected_full: format!(
+                "{}?{}",
+                char::from(Token::OperatorBegin(orientation)),
+                char::from(Token::OperatorEnd(orientation))
+            ),
+            at_span,
+            op_span,
         }
+    }
+
+    pub fn missing_closing_brace(
+        found: char,
+        at_span: SourceSpan,
+        op_span: SourceSpan,
+        orientation: Orientation,
+    ) -> Self {
+        LexError::MissingClosingBrace {
+            ch_expected: Token::OperatorEnd(orientation).into(),
+            ch_found: found,
+            expected_full: format!(
+                "{}?{}",
+                char::from(Token::OperatorBegin(orientation)),
+                char::from(Token::OperatorEnd(orientation))
+            ),
+            at_span,
+            op_span,
+        }
+    }
+
+    pub fn missing_conditional_path(at_span: SourceSpan) -> Self {
+        LexError::MissingConditionalPath { at_span }
     }
 }
 
+#[derive(Error, Debug, Diagnostic)]
+#[error("{} problem(s) found", errors.len())]
+pub struct LexErrors {
+    #[source_code]
+    pub src: miette::NamedSource<String>,
+    #[related]
+    pub errors: Vec<LexError>,
+}
+
 pub struct Lexer {
+    source: String,
     grid: Vec<Vec<char>>,
     tokens: Vec<Vec<SpanToken>>,
-    diagnostics: Vec<Diagnostic>,
+    offsets: Vec<Vec<usize>>,
+    diagnostics: Vec<LexError>,
+}
+
+impl From<String> for Lexer {
+    fn from(value: String) -> Self {
+        Lexer::new(value)
+    }
 }
 
 impl Lexer {
-    pub fn new(grid: Vec<Vec<char>>) -> Self {
+    pub fn new(source: String) -> Self {
+        let mut offset = 0;
+        let mut offsets: Vec<Vec<usize>> = Vec::new();
+        let grid: Vec<Vec<char>> = source
+            .lines()
+            .map(|line| {
+                offsets.push(line.char_indices().map(|(i, _)| offset + i).collect());
+                offset += line.len() + 1;
+                line.chars().collect()
+            })
+            .collect();
         let tokens = grid
             .iter()
             .enumerate()
@@ -57,10 +125,17 @@ impl Lexer {
             .collect();
 
         Self {
+            source,
             grid,
             tokens,
+            offsets,
             diagnostics: Vec::new(),
         }
+    }
+
+    fn span(&self, x: usize, y: usize, len: usize) -> SourceSpan {
+        let offset = self.offsets[y][x];
+        (offset, len).into()
     }
 
     fn get_operator(&self, x: usize, y: usize) -> Option<Orientation> {
@@ -89,7 +164,7 @@ impl Lexer {
         }
     }
 
-    fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, Diagnostic> {
+    fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, LexError> {
         match character {
             ' ' => Ok(Token::Empty),
             '.' => Ok(Token::Dot),
@@ -99,38 +174,38 @@ impl Lexer {
             '\\' => Ok(Token::Mirror(MirrorKind::Backward)),
             '[' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
                 Some(']') => Ok(Token::OperatorBegin(Orientation::Vertical)),
-                _ => Err(Diagnostic::new(
-                    x,
-                    y,
-                    DiagnosticKind::MissingClosingBrace,
-                    Severity::Error,
+                c => Err(LexError::missing_closing_brace(
+                    *c.unwrap_or(&' '),
+                    self.span(x + 2, y, 1),
+                    self.span(x, y, 2),
+                    Orientation::Vertical,
                 )),
             },
             ']' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
                 Some('[') => Ok(Token::OperatorEnd(Orientation::Vertical)),
-                _ => Err(Diagnostic::new(
-                    x,
-                    y,
-                    DiagnosticKind::MissingOpeningBrace,
-                    Severity::Error,
+                c => Err(LexError::missing_opening_brace(
+                    *c.unwrap_or(&' '),
+                    self.span(x - 2, y, 1),
+                    self.span(x - 1, y, 2),
+                    Orientation::Vertical,
                 )),
             },
             '{' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
                 Some('}') => Ok(Token::OperatorBegin(Orientation::Horizontal)),
-                _ => Err(Diagnostic::new(
-                    x,
-                    y,
-                    DiagnosticKind::MissingClosingBrace,
-                    Severity::Error,
+                c => Err(LexError::missing_closing_brace(
+                    *c.unwrap_or(&' '),
+                    self.span(x + 2, y, 1),
+                    self.span(x, y, 2),
+                    Orientation::Horizontal,
                 )),
             },
             '}' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
                 Some('{') => Ok(Token::OperatorEnd(Orientation::Horizontal)),
-                _ => Err(Diagnostic::new(
-                    x,
-                    y,
-                    DiagnosticKind::MissingOpeningBrace,
-                    Severity::Error,
+                c => Err(LexError::missing_opening_brace(
+                    *c.unwrap_or(&' '),
+                    self.span(x - 2, y, 1),
+                    self.span(x - 1, y, 2),
+                    Orientation::Horizontal,
                 )),
             },
             '(' => Ok(Token::Reflector(MirrorKind::Forward)),
@@ -142,12 +217,7 @@ impl Lexer {
             '~' => match self.grid.get(y + 1).and_then(|row| row.get(x)) {
                 Some('!') => Ok(Token::Conditonal(true)),
                 Some(_) => Ok(Token::Conditonal(false)),
-                _ => Err(Diagnostic::new(
-                    x,
-                    y,
-                    DiagnosticKind::ConditionPathMissing,
-                    Severity::Warn,
-                )),
+                _ => Err(LexError::missing_conditional_path(self.span(x, y + 1, 1))),
             },
             '!' => Ok(Token::Negate),
             '"' => Ok(Token::Quote),
@@ -195,11 +265,18 @@ impl Lexer {
         }
     }
 
-    pub fn finish(self) -> Result<Vec<Vec<SpanToken>>, Vec<Diagnostic>> {
+    pub fn finish(self) -> Result<Vec<Vec<SpanToken>>, LexErrors> {
         if self.diagnostics.is_empty() {
             Ok(self.tokens)
         } else {
-            Err(self.diagnostics)
+            Err(LexErrors {
+                src: NamedSource::new("", self.source),
+                errors: self.diagnostics,
+            })
         }
+    }
+
+    pub(crate) fn offsets(&self) -> Vec<Vec<usize>> {
+        self.offsets.clone()
     }
 }

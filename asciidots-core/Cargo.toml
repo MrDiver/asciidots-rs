@@ -1,0 +1,19 @@
+[package]
+name = "asciidots-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+miette = "7.6.0"
+rustc-hash = "2.1.1"
+thiserror = "2.0.18"
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "interpreter_bench"
+harness = false
+
+[profile.release]
+debug = true

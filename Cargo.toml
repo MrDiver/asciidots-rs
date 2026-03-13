@@ -1,21 +1,8 @@
-[package]
-name = "AsciidotsCompiler"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members =[
+	"asciidots-core",
+	"asciidots-cli",
+	"asciidots-tui"
+]
 
-[dependencies]
-clap = { version = "4", features = ["derive"] }
-colored = "3.1.1"
-crossterm = "0.29.0"
-miette = { version = "7.6.0", features = ["fancy"] }
-rustc-hash = "2.1.1"
-
-[dev-dependencies]
-criterion = "0.8.2"
-
-[[bench]]
-name = "interpreter_bench"
-harness = false
-
-[profile.release]
-debug = true
+resolver="2"

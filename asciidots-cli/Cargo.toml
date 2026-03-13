@@ -1,0 +1,10 @@
+[package]
+name = "asciidots-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+miette = { version = "7.6.0", features = ["fancy"] }
+asciidots-core = {path = "../asciidots-core/"}
+thiserror = "2.0.18"
