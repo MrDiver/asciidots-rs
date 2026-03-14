@@ -88,21 +88,20 @@ pub struct LexErrors {
 }
 
 pub struct Lexer {
-    source: String,
     grid: Vec<Vec<char>>,
     tokens: Vec<Vec<SpanToken>>,
     offsets: Vec<Vec<usize>>,
     diagnostics: Vec<LexError>,
 }
 
-impl From<String> for Lexer {
-    fn from(value: String) -> Self {
+impl From<&str> for Lexer {
+    fn from(value: &str) -> Self {
         Lexer::new(value)
     }
 }
 
 impl Lexer {
-    pub fn new(source: String) -> Self {
+    pub fn new(source: &str) -> Self {
         let mut offset = 0;
         let mut offsets: Vec<Vec<usize>> = Vec::new();
         let grid: Vec<Vec<char>> = source
@@ -125,7 +124,6 @@ impl Lexer {
             .collect();
 
         Self {
-            source,
             grid,
             tokens,
             offsets,
@@ -265,14 +263,11 @@ impl Lexer {
         }
     }
 
-    pub fn finish(self) -> Result<Vec<Vec<SpanToken>>, LexErrors> {
+    pub fn finish(self) -> Result<Vec<Vec<SpanToken>>, Vec<LexError>> {
         if self.diagnostics.is_empty() {
             Ok(self.tokens)
         } else {
-            Err(LexErrors {
-                src: NamedSource::new("", self.source),
-                errors: self.diagnostics,
-            })
+            Err(self.diagnostics)
         }
     }
 

@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     dot::Position,
-    parser::{LexErrors, Lexer},
+    parser::{LexError, Lexer},
     state_machine::{DotMachine, MachineEvent},
     token::{Direction, Orientation, SpanToken, Token},
 };
@@ -20,7 +20,7 @@ pub struct AsciiField {
 }
 
 impl AsciiField {
-    pub fn from_string(content: &str) -> Result<Self, LexErrors> {
+    pub fn from_string(content: &str) -> Result<Self, Vec<LexError>> {
         let mut lexer = Lexer::new(content.into());
         lexer.run();
         let offsets = lexer.offsets();
@@ -123,25 +123,36 @@ impl RuntimeError {
     }
 }
 
-pub struct ProgramState {
+pub enum InterpreterResult {
+    Print(String),
+    PrintLn(String),
+    InputRequest(usize),
+    EndProgram,
+}
+
+pub enum InterpreterCommand {
+    InputAnswer(usize, f64),
+}
+
+pub struct DotsInterpreter {
     field: AsciiField,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<RuntimeError>,
     operator_map: FxHashMap<(usize, usize), OperatorQueues>,
-    output: String,
+    results: Vec<InterpreterResult>,
 }
 
-impl ProgramState {
-    pub fn from_string(content: &str) -> Result<Self, LexErrors> {
+impl DotsInterpreter {
+    pub fn from_string(content: &str) -> Result<Self, Vec<LexError>> {
         let field = AsciiField::from_string(content)?;
-        let mut state = ProgramState {
+        let mut state = DotsInterpreter {
             field,
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
             operator_map: FxHashMap::default(),
-            output: String::with_capacity(128),
+            results: Vec::with_capacity(10),
         };
         state.initalize();
         Ok(state)
@@ -205,8 +216,7 @@ impl ProgramState {
             };
             match event {
                 MachineEvent::EndProgram => {
-                    self.dots.clear();
-                    return;
+                    self.results.push(InterpreterResult::EndProgram);
                 }
                 MachineEvent::HitOperator => {
                     let mut dot = self.dots.swap_remove(i);
@@ -224,12 +234,12 @@ impl ProgramState {
                     repeat_iteration = true;
                 }
                 MachineEvent::PrintLn(s) => {
-                    self.output.push_str(format!("{}\n", s).as_str());
+                    self.results.push(InterpreterResult::PrintLn(s));
                     let lookahead = self.field.at(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
                 MachineEvent::Print(s) => {
-                    self.output.push_str(format!("{}", s).as_str());
+                    self.results.push(InterpreterResult::Print(s));
                     let lookahead = self.field.at(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
@@ -257,7 +267,8 @@ impl ProgramState {
         }
     }
 
-    pub fn step(&mut self) -> Result<(), &[RuntimeError]> {
+    pub fn step(&mut self) -> Result<&[InterpreterResult], &[RuntimeError]> {
+        self.results.clear();
         // 1. Step all Dots
         self.interpret();
 
@@ -272,7 +283,7 @@ impl ProgramState {
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
         } else {
-            Ok(())
+            Ok(&self.results)
         }
     }
 
@@ -287,13 +298,9 @@ impl ProgramState {
     pub fn queues(&self) -> &FxHashMap<(usize, usize), OperatorQueues> {
         &self.operator_map
     }
-
-    pub fn output(&self) -> &str {
-        &self.output
-    }
 }
 
-impl std::fmt::Debug for ProgramState {
+impl std::fmt::Debug for DotsInterpreter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,

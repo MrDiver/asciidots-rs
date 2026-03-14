@@ -15,6 +15,7 @@ pub enum MachineEvent {
     HitOperator,
     PrintLn(String),
     Print(String),
+    Input(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -39,12 +40,16 @@ pub struct PrintingState {
 }
 
 #[derive(Debug, Clone)]
+pub struct InputWaitingState;
+
+#[derive(Debug, Clone)]
 pub enum MachineState {
     Travel(TravelState),
     Set(SetState),
     Dead(DeadState),
     Waiting(WaitingState),
     Printing(PrintingState),
+    InputWaiting(InputWaitingState),
 }
 
 impl MachineState {
@@ -146,6 +151,7 @@ impl DotMachine {
             MachineState::Set(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Waiting(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Printing(s) => s.process(&mut self.dot, &token, pending_dots),
+            MachineState::InputWaiting(s) => s.process(&mut self.dot, &token, pending_dots),
             MachineState::Dead(_) => Ok(MachineEvent::Nothing),
         }
     }
@@ -155,15 +161,17 @@ impl DotMachine {
             MachineEvent::Died => MachineState::dead(),
             MachineEvent::EndProgram => MachineState::dead(),
             MachineEvent::HitOperator => MachineState::waiting(),
-            MachineEvent::Nothing | MachineEvent::PrintLn(_) | MachineEvent::Print(_) => {
-                match &mut self.state {
-                    MachineState::Travel(s) => s.next(&mut self.dot, &lookahead),
-                    MachineState::Set(s) => s.next(&mut self.dot, &lookahead),
-                    MachineState::Waiting(s) => s.next(&mut self.dot, &lookahead),
-                    MachineState::Printing(s) => s.next(&mut self.dot, &lookahead),
-                    MachineState::Dead(_) => self.state.clone(),
-                }
-            }
+            MachineEvent::Nothing
+            | MachineEvent::PrintLn(_)
+            | MachineEvent::Print(_)
+            | MachineEvent::Input(_) => match &mut self.state {
+                MachineState::Travel(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::Set(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::Waiting(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::Printing(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::InputWaiting(s) => s.next(&mut self.dot, &lookahead),
+                MachineState::Dead(_) => self.state.clone(),
+            },
         };
     }
 }
@@ -399,5 +407,20 @@ impl MachineStateExecutor for PrintingState {
                 _ => MachineState::travel(),
             }
         }
+    }
+}
+
+impl MachineStateExecutor for InputWaitingState {
+    fn process(
+        &mut self,
+        dot: &mut Dot,
+        token: &Token,
+        pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, RuntimeErrorKind> {
+        todo!()
+    }
+
+    fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
+        todo!()
     }
 }

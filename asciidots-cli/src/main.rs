@@ -1,4 +1,4 @@
-use asciidots_cli::check;
+use asciidots_cli::{check, run};
 use clap::{
     Parser, Subcommand,
     builder::{
@@ -46,8 +46,12 @@ fn main() -> miette::Result<()> {
     match cli.command {
         Commands::Check { path } => {
             let content = std::fs::read_to_string(path).into_diagnostic()?;
-            check(content)?;
+            check(&content)?;
             println!("No errors found");
+        }
+        Commands::Run { path, tui } => {
+            let content = std::fs::read_to_string(path).into_diagnostic()?;
+            run(&content)?;
         }
         _ => todo!(),
     }

@@ -7,4 +7,5 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 asciidots-core = {path = "../asciidots-core/"}
+asciidots-tui = {path = "../asciidots-tui/"}
 thiserror = "2.0.18"
