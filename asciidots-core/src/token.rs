@@ -157,7 +157,7 @@ impl From<Token> for char {
             Token::ForceDirection(Direction::Left) => '<',
             Token::ForceDirection(Direction::Right) => '>',
             Token::Duplicate => '*',
-            Token::Digit(d) => d.to_ascii_lowercase().into(),
+            Token::Digit(d) => char::from_digit(d as u32, 10).unwrap_or('0'),
             Token::Char(c) => c,
         }
     }

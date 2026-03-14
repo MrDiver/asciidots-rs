@@ -51,7 +51,11 @@ fn main() -> miette::Result<()> {
         }
         Commands::Run { path, tui } => {
             let content = std::fs::read_to_string(path).into_diagnostic()?;
-            run(&content)?;
+            if tui{
+                asciidots_tui::run(&content);
+            }else{
+                run(&content)?;
+            }
         }
         _ => todo!(),
     }

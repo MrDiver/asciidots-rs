@@ -17,6 +17,8 @@ pub type TokenField = Vec<Vec<SpanToken>>;
 pub struct AsciiField {
     field: TokenField,
     offsets: Vec<Vec<usize>>,
+    width: usize,
+    height: usize,
 }
 
 impl AsciiField {
@@ -25,9 +27,17 @@ impl AsciiField {
         lexer.run();
         let offsets = lexer.offsets();
         let field = lexer.finish()?;
+        let height = field.len();
+        let width = field
+            .iter()
+            .map(|line| line.len())
+            .max()
+            .unwrap_or_default();
         Ok(AsciiField {
             field,
             offsets: offsets,
+            height,
+            width,
         })
     }
 
@@ -37,6 +47,9 @@ impl AsciiField {
 
     pub fn at(&self, position: &Position) -> Token {
         let &Position { x, y } = position;
+        if x < 0 || y < 0 {
+            return Token::Empty;
+        }
         self.field
             .get(y as usize)
             .and_then(|row| row.get(x as usize))
@@ -46,6 +59,14 @@ impl AsciiField {
 
     pub fn offset(&self, position: &Position) -> usize {
         self.offsets[position.y as usize][position.x as usize]
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
     }
 }
 
@@ -123,6 +144,7 @@ impl RuntimeError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum InterpreterResult {
     Print(String),
     PrintLn(String),
@@ -130,6 +152,7 @@ pub enum InterpreterResult {
     EndProgram,
 }
 
+#[derive(Debug, Clone)]
 pub enum InterpreterCommand {
     InputAnswer(usize, f64),
 }
