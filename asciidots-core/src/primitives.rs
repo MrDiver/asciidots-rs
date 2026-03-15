@@ -1,6 +1,44 @@
 use std::ops::Add;
 
-use crate::token::{Direction, Orientation};
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub fn orientation(&self) -> Orientation {
+        match self {
+            Direction::Up | Direction::Down => Orientation::Vertical,
+            Direction::Left | Direction::Right => Orientation::Horizontal,
+        }
+    }
+
+    pub fn reverse(&self) -> Direction {
+        match *self {
+            Self::Up => Self::Down,
+            Self::Right => Self::Left,
+            Self::Down => Self::Up,
+            Self::Left => Self::Right,
+        }
+    }
+
+    pub fn orthogonal(&self, dir: &Direction) -> bool {
+        self.orientation() != dir.orientation()
+    }
+
+    pub fn parallel(&self, dir: &Direction) -> bool {
+        self.orientation() == dir.orientation()
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
+pub enum Orientation {
+    Horizontal,
+    Vertical,
+}
 
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct Position {
@@ -71,48 +109,5 @@ impl Add for Position {
             x: self.x + other.x,
             y: self.y + other.y,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Dot {
-    pub direction: Direction,
-    pub position: Position,
-    pub value: f64,
-    pub id: u64,
-}
-
-impl Dot {
-    pub fn new(direction: Direction, position: Position, value: f64) -> Self {
-        Dot {
-            direction,
-            position,
-            value,
-            id: 0,
-        }
-    }
-
-    pub fn step(&mut self) -> &mut Self {
-        self.position = self.position + self.direction.into();
-        self
-    }
-
-    pub fn set_dir(&mut self, new_dir: Direction) -> &mut Self {
-        self.direction = new_dir;
-        self
-    }
-
-    pub fn set_value(&mut self, new_value: f64) -> &mut Self {
-        self.value = new_value;
-        self
-    }
-
-    pub fn set_id(&mut self, new_id: u64) -> &mut Self {
-        self.id = new_id;
-        self
-    }
-
-    pub fn orientation(&self) -> Orientation {
-        self.direction.orientation()
     }
 }

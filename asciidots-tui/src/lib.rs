@@ -1,21 +1,16 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use asciidots_core::{
-    dot::Position,
-    interpreter::{AsciiField, DotsInterpreter, InterpreterResult},
-    parser::LexError,
-    state_machine::DotMachine,
-    token::Token,
+use asciidots_core::presentation::{
+    AppCommand, DotsView, GridCell, GridCellKind, GridModel, RuntimeController,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
-    DefaultTerminal, Frame, Terminal,
+    DefaultTerminal,
     layout::{Constraint, Direction, Layout},
     style::Style,
     text::Text,
     widgets::{Block, Borders, Clear, Widget},
 };
-use rustc_hash::FxHashSet;
 
 // ╔══════════════════════════════════════╗
 // ║                                      ║
@@ -61,48 +56,6 @@ impl RGB {
 
 // ╔══════════════════════════════════════╗
 // ║                                      ║
-// ║              GridModel               ║
-// ║                                      ║
-// ╚══════════════════════════════════════╝
-
-pub struct GridCell {
-    c: char,
-    foreground: RGB,
-    background: Option<RGB>,
-}
-
-impl GridCell {
-    fn new(c: char, foreground: RGB, background: Option<RGB>) -> Self {
-        GridCell {
-            c,
-            foreground,
-            background,
-        }
-    }
-}
-
-impl Default for GridCell {
-    fn default() -> Self {
-        Self {
-            c: ' ',
-            foreground: RGB {
-                r: 255,
-                g: 255,
-                b: 255,
-            },
-            background: None,
-        }
-    }
-}
-
-pub trait GridModel {
-    fn width(&self) -> usize;
-    fn height(&self) -> usize;
-    fn get_cell(&self, x: usize, y: usize) -> Option<GridCell>;
-}
-
-// ╔══════════════════════════════════════╗
-// ║                                      ║
 // ║              From< X >               ║
 // ║                                      ║
 // ╚══════════════════════════════════════╝
@@ -113,69 +66,20 @@ impl From<RGB> for ratatui::style::Color {
     }
 }
 
-impl From<GridCell> for ratatui::style::Style {
-    fn from(value: GridCell) -> Self {
-        let mut style = Style::default().fg(value.foreground.into());
-        if let Some(c) = value.background {
-            style = style.bg(c.into());
-        }
-        style
-    }
+fn style_for_grid_cell_kind(kind: GridCellKind) -> Style {
+    let foreground = match kind {
+        GridCellKind::Default => RGB::GRAY_500,
+        GridCellKind::Quote => RGB::MINT,
+        GridCellKind::OperatorDelimiter => RGB::LEMON,
+        GridCellKind::Operator => RGB::WHITE,
+        GridCellKind::ActiveDot => RGB::CORAL,
+    };
+
+    Style::default().fg(foreground.into())
 }
 
-// ╔══════════════════════════════════════╗
-// ║                                      ║
-// ║           Ascii Map Model            ║
-// ║           (Impl GridModel)           ║
-// ╚══════════════════════════════════════╝
-
-pub struct AsciiMapModel<'a> {
-    field: &'a AsciiField,
-    dots: &'a [DotMachine],
-    dot_positions: FxHashSet<(usize, usize)>,
-}
-
-impl<'a> AsciiMapModel<'a> {
-    fn new(field: &'a AsciiField, dots: &'a [DotMachine]) -> Self {
-        let dot_positions: FxHashSet<(usize, usize)> = dots
-            .iter()
-            .map(|d| (d.position().x as usize, d.position().y as usize))
-            .collect();
-        AsciiMapModel {
-            field,
-            dots,
-            dot_positions,
-        }
-    }
-}
-
-impl<'a> GridModel for AsciiMapModel<'a> {
-    fn width(&self) -> usize {
-        self.field.width()
-    }
-
-    fn height(&self) -> usize {
-        self.field.height()
-    }
-
-    fn get_cell(&self, x: usize, y: usize) -> Option<GridCell> {
-        let token = self.field.at(&Position {
-            x: x as i32,
-            y: y as i32,
-        });
-        let (mut foreground, background) = match token {
-            Token::Quote => (RGB::MINT, None),
-            Token::OperatorBegin(_) | Token::OperatorEnd(_) => (RGB::LEMON, None),
-            Token::Operator { .. } => (RGB::WHITE, None),
-            _ => (RGB::GRAY_500, None),
-        };
-
-        if self.dot_positions.contains(&(x, y)){
-            foreground = RGB::CORAL;
-        }
-        let c = char::from(token);
-        Some(GridCell::new(c, foreground, background))
-    }
+fn style_for_grid_cell(cell: GridCell) -> Style {
+    style_for_grid_cell_kind(cell.kind)
 }
 
 // ╔══════════════════════════════════════╗
@@ -204,7 +108,7 @@ impl<'a> Widget for GridWidget<'a> {
                 }) {
                     if let Some(grid_cell) = self.grid_model.get_cell(xs, ys) {
                         let c = grid_cell.c;
-                        let style: Style = grid_cell.into();
+                        let style = style_for_grid_cell(grid_cell);
                         cell.set_char(c);
                         cell.set_style(style);
                     }else{
@@ -215,102 +119,6 @@ impl<'a> Widget for GridWidget<'a> {
             }
         }
     }
-}
-
-// ╔══════════════════════════════════════╗
-// ║                                      ║
-// ║            App Controller            ║
-// ║                                      ║
-// ╚══════════════════════════════════════╝
-pub struct AppController {
-    interpreter: DotsInterpreter,
-    source: String,
-    tick_speed: Duration,
-    steps_per_frame: usize,
-    running: bool,
-    clock: Instant,
-}
-
-pub enum AppCommand {
-    Step,
-    Reverse,
-    Pause,
-    Start,
-    Reset,
-    SetSpeed(Duration),
-    StopProgram,
-}
-
-impl AppController {
-    pub fn new(content: &str) -> Result<Self, Vec<LexError>> {
-        let interpreter = DotsInterpreter::from_string(content)?;
-        Ok(Self { interpreter, source: content.to_string(), tick_speed: Duration::from_millis(100), steps_per_frame: 1, running: false, clock: Instant::now() })
-    }
-
-    pub fn reset(&mut self) {
-        match DotsInterpreter::from_string(&self.source) {
-            Ok(interpreter) => {
-                self.interpreter = interpreter;
-                self.running = false;
-                self.clock = Instant::now();
-            }
-            Err(_) => {} // source was valid at construction, so this shouldn't happen
-        }
-    }
-
-    pub fn tick(&mut self) -> Vec<InterpreterResult>{
-        if self.running && self.clock.elapsed() >= self.tick_speed {
-            for _ in 0..self.steps_per_frame {
-                let results:Vec<InterpreterResult>= self.interpreter.step().unwrap().iter().map(|r| r.clone()).collect();
-                if results.len() > 0 {
-                    return results;
-                }
-            }
-            self.clock = Instant::now();
-        }
-        Vec::new()
-    }
-
-    pub fn handle_command(&mut self, command: AppCommand) {
-        match command {
-            AppCommand::Step => {
-                self.interpreter.step().unwrap();
-            }
-            AppCommand::Reverse => {
-                todo!()
-            }
-            AppCommand::Pause => {
-                self.running = false;
-            }
-            AppCommand::Start => {
-                self.running = true;
-            }
-            AppCommand::SetSpeed(speed) => {
-                self.tick_speed = speed;
-            }
-            AppCommand::Reset => {
-                self.reset();
-            }
-            AppCommand::StopProgram => {
-                // Handled in main loop
-            }
-        } 
-    }
-
-    pub fn get_grid_model(&self) -> AsciiMapModel<'_> {
-        AsciiMapModel::new(self.interpreter.get_field(), self.interpreter.get_dots())
-    }
-}
-
-// ╔══════════════════════════════════════╗
-// ║                                      ║
-// ║             View Trait               ║
-// ║                                      ║
-// ╚══════════════════════════════════════╝
-
-pub trait DotsView {
-    fn render(&mut self, controller: &AppController);
-    fn poll_command(&mut self) -> Option<AppCommand>;
 }
 
 // ╔══════════════════════════════════════╗
@@ -405,10 +213,11 @@ impl Drop for RatatuiView {
 }
 
 impl DotsView for RatatuiView {
-    fn render(&mut self, controller: &AppController) {
+    fn render(&mut self, controller: &RuntimeController) {
         self.term
             .draw(|frame| {
                 let area = frame.area();
+                let grid_model = controller.grid_model();
                 let cols = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints(Constraint::from_ratios([(2, 3), (1, 3)]))
@@ -420,34 +229,28 @@ impl DotsView for RatatuiView {
                 let program_inner = program_block.inner(cols[0]);
 
                 frame.render_widget(program_block, cols[0]);
-                // Clear the inner area
                 frame.render_widget(Clear, program_inner);
                 frame.render_widget(
                     GridWidget {
-                        grid_model: &controller.get_grid_model(),
-                        scroll: self.grid_scroll, // TODO: Make scrollable
+                        grid_model: &grid_model,
+                        scroll: self.grid_scroll,
                     },
                     program_inner,
                 );
-                // Settings Panel
                 let settings_block = Block::default()
-                        .title("Status")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(RGB::SKY.into()));
+                    .title("Status")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(RGB::SKY.into()));
                 let settings_inner = settings_block.inner(cols[1]);
-                frame.render_widget(
-                    settings_block,
-                    cols[1],
-                );
+                frame.render_widget(settings_block, cols[1]);
                 let text = Text::raw(format!(
                     "Running: {}\nTick Speed: {:?}\nSteps/Frame: {}\nDots: {}",
-                    if controller.running { "Yes" } else { "No" },
-                    controller.tick_speed,
-                    controller.steps_per_frame,
-                    controller.interpreter.num_dots(),
+                    if controller.is_running() { "Yes" } else { "No" },
+                    controller.tick_speed(),
+                    controller.steps_per_frame(),
+                    controller.num_dots(),
                 ));
                 frame.render_widget(text, settings_inner);
-
             })
             .unwrap();
     }
@@ -465,7 +268,7 @@ impl DotsView for RatatuiView {
 }
 
 pub fn run(content: &str) {
-    let mut app = AppController::new(content).unwrap();
+    let mut app = RuntimeController::new(content).unwrap();
     let mut view = RatatuiView::new();
     loop {
         let command = view.poll_command();

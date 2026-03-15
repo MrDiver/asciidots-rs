@@ -1,42 +1,4 @@
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-impl Direction {
-    pub fn orientation(&self) -> Orientation {
-        match self {
-            Direction::Up | Direction::Down => Orientation::Vertical,
-            Direction::Left | Direction::Right => Orientation::Horizontal,
-        }
-    }
-
-    pub fn reverse(&self) -> Direction {
-        match *self {
-            Self::Up => Self::Down,
-            Self::Right => Self::Left,
-            Self::Down => Self::Up,
-            Self::Left => Self::Right,
-        }
-    }
-
-    pub fn orthogonal(&self, dir: &Direction) -> bool {
-        self.orientation() != dir.orientation()
-    }
-
-    pub fn parallel(&self, dir: &Direction) -> bool {
-        self.orientation() == dir.orientation()
-    }
-}
-
-#[derive(Eq, PartialEq, Debug, Clone, Copy)]
-pub enum Orientation {
-    Horizontal,
-    Vertical,
-}
+use crate::primitives::{Direction, Orientation};
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum MirrorKind {

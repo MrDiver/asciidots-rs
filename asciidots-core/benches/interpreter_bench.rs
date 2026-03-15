@@ -1,8 +1,8 @@
-use asciidots_core::dot::{Dot, Position};
-use asciidots_core::interpreter::{AsciiField, ProgramState};
+use asciidots_core::interpreter::{AsciiField, DotsInterpreter};
 use asciidots_core::parser::Lexer;
-use asciidots_core::state_machine::DotMachine;
-use asciidots_core::token::{Direction, Token};
+use asciidots_core::parser::Token;
+use asciidots_core::primitives::{Direction, Position};
+use asciidots_core::state_machine::{Dot, DotMachine};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -16,8 +16,7 @@ const SUPERBIG: &str = include_str!("../samples/superbig.dots");
 const DEATHFACTORY: &str = include_str!("../samples/deathfactory.dots");
 
 fn lex_source(source: &str) {
-    let field: Vec<Vec<char>> = source.lines().map(|line| line.chars().collect()).collect();
-    let mut lexer = Lexer::new(field);
+    let mut lexer = Lexer::new(source);
     lexer.run();
     let tokens = lexer
         .finish()
@@ -80,8 +79,8 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
     });
 }
 
-fn make_initialized_program(source: &str) -> ProgramState {
-    let mut program = ProgramState::from_string(source)
+fn make_initialized_program(source: &str) -> DotsInterpreter {
+    let program = DotsInterpreter::from_string(source)
         .expect("program parsing should succeed for benchmark input");
     program
 }
