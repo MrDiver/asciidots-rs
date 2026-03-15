@@ -1,12 +1,44 @@
 use crate::{primitives::Orientation, state_machine::DotMachine};
 use std::collections::VecDeque;
 
+/// A small queue for dots waiting at one side of an operator.
+///
+/// Optimised for the common case where at most one dot is queued at a time:
+/// the first arrival is stored inline as `Option<DotMachine>`, so no heap
+/// allocation occurs until a second dot arrives before the first has been
+/// consumed. Overflow beyond the first entry spills into a `VecDeque`.
+#[derive(Debug, Default)]
+struct DotQueue {
+    first: Option<DotMachine>,
+    overflow: VecDeque<DotMachine>,
+}
+
+impl DotQueue {
+    fn push(&mut self, dot: DotMachine) {
+        if self.first.is_none() {
+            self.first = Some(dot);
+        } else {
+            self.overflow.push_back(dot);
+        }
+    }
+
+    fn pop_front(&mut self) -> Option<DotMachine> {
+        let dot = self.first.take()?;
+        self.first = self.overflow.pop_front();
+        Some(dot)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.first.is_none()
+    }
+}
+
 #[derive(Debug)]
 pub struct OperatorQueues {
     orientation: Orientation,
     op: char,
-    horizontal: VecDeque<DotMachine>,
-    vertical: VecDeque<DotMachine>,
+    horizontal: DotQueue,
+    vertical: DotQueue,
 }
 
 impl OperatorQueues {
@@ -14,20 +46,20 @@ impl OperatorQueues {
         Self {
             orientation,
             op,
-            horizontal: VecDeque::with_capacity(1),
-            vertical: VecDeque::with_capacity(1),
+            horizontal: DotQueue::default(),
+            vertical: DotQueue::default(),
         }
     }
 
     pub(super) fn push(&mut self, dot: DotMachine) {
         match dot.direction().orientation() {
-            Orientation::Horizontal => self.horizontal.push_back(dot),
-            Orientation::Vertical => self.vertical.push_back(dot),
+            Orientation::Horizontal => self.horizontal.push(dot),
+            Orientation::Vertical => self.vertical.push(dot),
         }
     }
 
     pub(super) fn get_result(&mut self) -> Option<DotMachine> {
-        if self.horizontal.len() > 0 && self.vertical.len() > 0 {
+        if !self.horizontal.is_empty() && !self.vertical.is_empty() {
             let (mut primary, secondary) = {
                 let doth = self.horizontal.pop_front().unwrap();
                 let dotv = self.vertical.pop_front().unwrap();

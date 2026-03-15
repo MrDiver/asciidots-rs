@@ -131,15 +131,18 @@ pub struct Spanned<T> {
     line: usize,
     inner: T,
     repr: char,
+    /// Byte offset of this token in the original source string.
+    offset: usize,
 }
 
 impl<T> Spanned<T> {
-    pub fn new(t: T, col: usize, line: usize, c: char) -> Self {
+    pub fn new(t: T, col: usize, line: usize, c: char, offset: usize) -> Self {
         Self {
             col,
             line,
             inner: t,
             repr: c,
+            offset,
         }
     }
 
@@ -157,6 +160,10 @@ impl<T> Spanned<T> {
 
     pub fn repr(&self) -> char {
         self.repr
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 }
 

@@ -53,39 +53,55 @@ impl DotsInterpreter {
         &self.field
     }
 
+    fn push_print(results: &mut Vec<InterpreterResult>, value: String) {
+        if let Some(InterpreterResult::Print(existing)) = results.last_mut() {
+            existing.push_str(&value);
+        } else {
+            results.push(InterpreterResult::Print(value));
+        }
+    }
+
+    fn push_print_char(results: &mut Vec<InterpreterResult>, value: char) {
+        if let Some(InterpreterResult::Print(existing)) = results.last_mut() {
+            existing.push(value);
+        } else {
+            let mut output = String::with_capacity(1);
+            output.push(value);
+            results.push(InterpreterResult::Print(output));
+        }
+    }
+
     fn initalize(&mut self) {
-        for row in self.field.get_field() {
-            for token in row {
-                let position = Position::new(token.col() as i32, token.line() as i32);
-                match *token.inner() {
-                    Token::Dot => {
-                        for direction in &[
-                            Direction::Up,
-                            Direction::Down,
-                            Direction::Left,
-                            Direction::Right,
-                        ] {
-                            let offsetpos = position + (*direction).into();
-                            if let Token::Pipe(orientation) = self.field.at(&offsetpos)
-                                && orientation == direction.orientation()
-                            {
-                                self.dots.push(DotMachine::new(
-                                    *direction,
-                                    token.col() as i32,
-                                    token.line() as i32,
-                                ));
-                                break;
-                            }
+        for token in self.field.get_field() {
+            let position = Position::new(token.col() as i32, token.line() as i32);
+            match *token.inner() {
+                Token::Dot => {
+                    for direction in &[
+                        Direction::Up,
+                        Direction::Down,
+                        Direction::Left,
+                        Direction::Right,
+                    ] {
+                        let offsetpos = position + (*direction).into();
+                        if let Token::Pipe(orientation) = self.field.at(&offsetpos)
+                            && orientation == direction.orientation()
+                        {
+                            self.dots.push(DotMachine::new(
+                                *direction,
+                                token.col() as i32,
+                                token.line() as i32,
+                            ));
+                            break;
                         }
                     }
-                    Token::Operator { orientation, repr } => {
-                        self.operator_map.insert(
-                            (token.col(), token.line()),
-                            OperatorQueues::new(orientation, repr),
-                        );
-                    }
-                    _ => {}
                 }
+                Token::Operator { orientation, repr } => {
+                    self.operator_map.insert(
+                        (token.col(), token.line()),
+                        OperatorQueues::new(orientation, repr),
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -125,8 +141,13 @@ impl DotsInterpreter {
                     let lookahead = self.field.at(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
+                MachineEvent::PrintChar(c) => {
+                    Self::push_print_char(&mut self.results, c);
+                    let lookahead = self.field.at(dot.position());
+                    dot.next(&MachineEvent::Nothing, &lookahead)
+                }
                 MachineEvent::Print(s) => {
-                    self.results.push(InterpreterResult::Print(s));
+                    Self::push_print(&mut self.results, s);
                     let lookahead = self.field.at(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
@@ -158,8 +179,7 @@ impl DotsInterpreter {
         self.results.clear();
         self.interpret();
         Self::cleanup_dead_dots(&mut self.dots);
-        self.dots.extend_from_slice(&self.pending_dots);
-        self.pending_dots.clear();
+        self.dots.append(&mut self.pending_dots);
 
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
@@ -189,7 +209,7 @@ impl std::fmt::Debug for DotsInterpreter {
             self.field
                 .get_field()
                 .iter()
-                .flat_map(|row| row.iter().map(|token| token.inner()))
+                .map(|token| token.inner())
                 .collect::<Vec<_>>()
         )?;
         writeln!(f, "Dots:")?;

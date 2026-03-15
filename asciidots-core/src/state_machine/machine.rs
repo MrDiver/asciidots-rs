@@ -5,7 +5,7 @@ use crate::{
 
 use super::dot::Dot;
 use super::event::{MachineEvent, RuntimeErrorKind};
-use super::states::{MachineState, MachineStateExecutor};
+use super::states::{MachineState, MachineStateExecutor, StateTransition};
 
 #[derive(Clone)]
 pub struct DotMachine {
@@ -72,12 +72,13 @@ impl DotMachine {
     }
 
     pub fn next(&mut self, event: &MachineEvent, lookahead: &Token) {
-        self.state = match event {
-            MachineEvent::Died => MachineState::dead(),
-            MachineEvent::EndProgram => MachineState::dead(),
-            MachineEvent::HitOperator => MachineState::waiting(),
+        let transition = match event {
+            MachineEvent::Died => StateTransition::Transition(MachineState::dead()),
+            MachineEvent::EndProgram => StateTransition::Transition(MachineState::dead()),
+            MachineEvent::HitOperator => StateTransition::Transition(MachineState::waiting()),
             MachineEvent::Nothing
             | MachineEvent::PrintLn(_)
+            | MachineEvent::PrintChar(_)
             | MachineEvent::Print(_)
             | MachineEvent::Input(_) => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, lookahead),
@@ -85,9 +86,13 @@ impl DotMachine {
                 MachineState::Waiting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Printing(s) => s.next(&mut self.dot, lookahead),
                 MachineState::InputWaiting(s) => s.next(&mut self.dot, lookahead),
-                MachineState::Dead(_) => self.state.clone(),
+                MachineState::Dead(_) => StateTransition::Transition(MachineState::dead()),
             },
         };
+
+        if let StateTransition::Transition(state) = transition {
+            self.state = state;
+        }
     }
 }
 

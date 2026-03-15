@@ -3,54 +3,64 @@ use crate::{
     primitives::Position,
 };
 
-pub type TokenField = Vec<Vec<SpanToken>>;
+/// A flat, rectangular token grid. Rows shorter than `width` are padded with
+/// [`Token::Empty`] so the layout is always `width × height` cells stored in
+/// row-major order. One contiguous allocation improves cache locality for the
+/// interpreter's hot `at()` call compared to `Vec<Vec<SpanToken>>`.
+pub type TokenField = Vec<SpanToken>;
 
 #[derive(Debug)]
 pub struct AsciiField {
+    /// Token at `(x, y)` lives at index `y * width + x`.
     field: TokenField,
-    offsets: Vec<Vec<usize>>,
     width: usize,
     height: usize,
 }
 
 impl AsciiField {
     pub fn from_string(content: &str) -> Result<Self, Vec<LexError>> {
-        let mut lexer = Lexer::new(content.into());
+        let mut lexer = Lexer::new(content);
         lexer.run();
-        let offsets = lexer.offsets();
-        let field = lexer.finish()?;
-        let height = field.len();
-        let width = field
-            .iter()
-            .map(|line| line.len())
-            .max()
-            .unwrap_or_default();
-        Ok(AsciiField {
-            field,
-            offsets,
-            height,
-            width,
-        })
+        let rows: Vec<Vec<SpanToken>> = lexer.finish()?;
+        let height = rows.len();
+        let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let mut field = Vec::with_capacity(width * height);
+        for (y, row) in rows.into_iter().enumerate() {
+            let row_len = row.len();
+            field.extend(row);
+            // Pad rows shorter than `width` so the grid is fully rectangular.
+            for x in row_len..width {
+                field.push(SpanToken::new(Token::Empty, x, y, ' ', 0));
+            }
+        }
+        Ok(AsciiField { field, width, height })
     }
 
-    pub fn get_field(&self) -> &TokenField {
+    pub fn get_field(&self) -> &[SpanToken] {
         &self.field
     }
 
+    /// Returns the token at `(x, y)`, or [`Token::Empty`] for out-of-bounds.
+    ///
+    /// Uses a single `y * width + x` index into the flat backing array for
+    /// better cache utilisation compared to a `Vec<Vec<_>>` lookup.
+    #[inline]
     pub fn at(&self, position: &Position) -> Token {
         let &Position { x, y } = position;
         if x < 0 || y < 0 {
             return Token::Empty;
         }
-        self.field
-            .get(y as usize)
-            .and_then(|row| row.get(x as usize))
-            .map(|token| *token.inner())
-            .unwrap_or_else(|| Token::Empty)
+        let (x, y) = (x as usize, y as usize);
+        if x >= self.width || y >= self.height {
+            return Token::Empty;
+        }
+        *self.field[y * self.width + x].inner()
     }
 
     pub fn offset(&self, position: &Position) -> usize {
-        self.offsets[position.y as usize][position.x as usize]
+        let x = position.x as usize;
+        let y = position.y as usize;
+        self.field[y * self.width + x].offset()
     }
 
     pub fn width(&self) -> usize {

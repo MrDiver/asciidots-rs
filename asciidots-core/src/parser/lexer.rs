@@ -34,7 +34,7 @@ impl Lexer {
             .map(|(y, row)| {
                 row.iter()
                     .enumerate()
-                    .map(|(x, character)| SpanToken::new(Token::Empty, x, y, *character))
+                    .map(|(x, character)| SpanToken::new(Token::Empty, x, y, *character, offsets[y][x]))
                     .collect()
             })
             .collect();
@@ -79,6 +79,15 @@ impl Lexer {
     }
 
     fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, LexError> {
+        if !matches!(character, '[' | ']' | '{' | '}')
+            && let Some(orientation) = self.get_operator(x, y)
+        {
+            return Ok(Token::Operator {
+                orientation,
+                repr: character,
+            });
+        }
+
         match character {
             ' ' => Ok(Token::Empty),
             '.' => Ok(Token::Dot),
@@ -138,29 +147,18 @@ impl Lexer {
             '\'' => Ok(Token::QuoteStream),
             ':' => Ok(Token::Filter(false)),
             ';' => Ok(Token::Filter(true)),
-            c => {
-                if let Some(orientation) = self.get_operator(x, y) {
-                    Ok(Token::Operator {
-                        orientation,
-                        repr: c,
-                    })
-                } else {
-                    match c {
-                        '>' => Ok(Token::ForceDirection(Direction::Right)),
-                        '<' => Ok(Token::ForceDirection(Direction::Left)),
-                        'v' => Ok(Token::ForceDirection(Direction::Down)),
-                        '^' => Ok(Token::ForceDirection(Direction::Up)),
-                        '+' => Ok(Token::CrossPipe),
-                        '&' => Ok(Token::StopProgram),
-                        '*' => Ok(Token::Duplicate),
-                        x if x.is_ascii_digit() => {
-                            Ok(Token::Digit(x.to_string().parse().unwrap_or_default()))
-                        }
-                        x if x.is_ascii_alphanumeric() => Ok(Token::Char(x)),
-                        _ => Ok(Token::Empty),
-                    }
-                }
-            }
+            c => match c {
+                '>' => Ok(Token::ForceDirection(Direction::Right)),
+                '<' => Ok(Token::ForceDirection(Direction::Left)),
+                'v' => Ok(Token::ForceDirection(Direction::Down)),
+                '^' => Ok(Token::ForceDirection(Direction::Up)),
+                '+' => Ok(Token::CrossPipe),
+                '&' => Ok(Token::StopProgram),
+                '*' => Ok(Token::Duplicate),
+                x if x.is_ascii_digit() => Ok(Token::Digit((x as u8) - b'0')),
+                x if x.is_ascii_alphanumeric() => Ok(Token::Char(x)),
+                _ => Ok(Token::Empty),
+            },
         }
     }
 
@@ -169,7 +167,7 @@ impl Lexer {
             for (x, character) in row.iter().enumerate() {
                 match self.lex_char(*character, x, y) {
                     Ok(t) => {
-                        self.tokens[y][x] = SpanToken::new(t, x, y, *character);
+                        self.tokens[y][x] = SpanToken::new(t, x, y, *character, self.offsets[y][x]);
                     }
                     Err(e) => {
                         self.diagnostics.push(e);
@@ -185,9 +183,5 @@ impl Lexer {
         } else {
             Err(self.diagnostics)
         }
-    }
-
-    pub(crate) fn offsets(&self) -> Vec<Vec<usize>> {
-        self.offsets.clone()
     }
 }

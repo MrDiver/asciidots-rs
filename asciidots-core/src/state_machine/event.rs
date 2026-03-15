@@ -12,6 +12,7 @@ pub enum MachineEvent {
     EndProgram,
     HitOperator,
     PrintLn(String),
+    PrintChar(char),
     Print(String),
     Input(usize),
 }

@@ -6,25 +6,25 @@ use crate::{
     primitives::{Direction, Orientation, Position},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum SetKind {
     Id,
     Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TravelState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SetState {
     kind: SetKind,
     pub(super) acc: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeadState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WaitingState;
 
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ pub struct PrintingState {
     pub(super) accumulator: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct InputWaitingState;
 
 #[derive(Debug, Clone)]
@@ -80,7 +80,12 @@ pub trait MachineStateExecutor {
         token: &Token,
         pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeErrorKind>;
-    fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState;
+    fn next(&mut self, dot: &mut Dot, token: &Token) -> StateTransition;
+}
+
+pub enum StateTransition {
+    Stay,
+    Transition(MachineState),
 }
 
 impl MachineStateExecutor for TravelState {
@@ -125,14 +130,16 @@ impl MachineStateExecutor for TravelState {
                 dot.step();
             }
             Token::Duplicate => {
+                pending_dots.reserve(2);
+                let dot_snapshot = *dot;
                 for d in &[
                     Direction::Up,
                     Direction::Down,
                     Direction::Left,
                     Direction::Right,
                 ] {
-                    if d != &dot.direction && d != &dot.direction.reverse() {
-                        let mut new_dot = dot.clone();
+                    if d != &dot_snapshot.direction && d != &dot_snapshot.direction.reverse() {
+                        let mut new_dot = dot_snapshot;
                         new_dot.set_dir(*d).step();
                         pending_dots.push(DotMachine::from(new_dot));
                     }
@@ -156,13 +163,13 @@ impl MachineStateExecutor for TravelState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> MachineState {
+    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
         match *token {
-            Token::Empty => MachineState::dead(),
-            Token::ValueMarker => MachineState::set(SetKind::Value),
-            Token::IdMarker => MachineState::set(SetKind::Id),
-            Token::Write => MachineState::printing(),
-            _ => MachineState::travel(),
+            Token::Empty => StateTransition::Transition(MachineState::dead()),
+            Token::ValueMarker => StateTransition::Transition(MachineState::set(SetKind::Value)),
+            Token::IdMarker => StateTransition::Transition(MachineState::set(SetKind::Id)),
+            Token::Write => StateTransition::Transition(MachineState::printing()),
+            _ => StateTransition::Stay,
         }
     }
 }
@@ -186,15 +193,15 @@ impl MachineStateExecutor for SetState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, dot: &mut Dot, token: &Token) -> MachineState {
+    fn next(&mut self, dot: &mut Dot, token: &Token) -> StateTransition {
         match *token {
-            Token::Digit(_) => MachineState::Set(self.clone()),
+            Token::Digit(_) => StateTransition::Stay,
             _ => {
                 match self.kind {
                     SetKind::Value => dot.set_value(self.acc as f64),
                     SetKind::Id => dot.set_id(self.acc),
                 };
-                MachineState::travel()
+                StateTransition::Transition(MachineState::travel())
             }
         }
     }
@@ -218,10 +225,10 @@ impl MachineStateExecutor for WaitingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> MachineState {
+    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
         match token {
-            Token::OperatorBegin(_) | Token::OperatorEnd(_) => MachineState::waiting(),
-            _ => MachineState::travel(),
+            Token::OperatorBegin(_) | Token::OperatorEnd(_) => StateTransition::Stay,
+            _ => StateTransition::Transition(MachineState::travel()),
         }
     }
 }
@@ -237,9 +244,9 @@ impl MachineStateExecutor for PrintingState {
             dot.step();
             if *token == Token::Quote {
                 self.inside_quote = false;
-                return Ok(MachineEvent::PrintLn(self.accumulator.clone()));
+                return Ok(MachineEvent::PrintLn(std::mem::take(&mut self.accumulator)));
             }
-            self.accumulator.push_str(format!("{}", token).as_str());
+            self.accumulator.push(char::from(*token));
             return Ok(MachineEvent::Nothing);
         } else if self.streaming {
             dot.step();
@@ -247,8 +254,7 @@ impl MachineStateExecutor for PrintingState {
                 self.streaming = false;
                 return Ok(MachineEvent::PrintLn(String::new()));
             }
-            let char = format!("{}", token);
-            return Ok(MachineEvent::Print(char));
+            return Ok(MachineEvent::PrintChar(char::from(*token)));
         }
         match *token {
             Token::Write => {
@@ -256,11 +262,11 @@ impl MachineStateExecutor for PrintingState {
             }
             Token::ValueMarker => {
                 dot.step();
-                return Ok(MachineEvent::PrintLn(format!("{}", dot.value)));
+                return Ok(MachineEvent::PrintLn(dot.value.to_string()));
             }
             Token::IdMarker => {
                 dot.step();
-                return Ok(MachineEvent::PrintLn(format!("{}", dot.id)));
+                return Ok(MachineEvent::PrintLn(dot.id.to_string()));
             }
             Token::QuoteStream => {
                 dot.step();
@@ -275,15 +281,15 @@ impl MachineStateExecutor for PrintingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> MachineState {
+    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
         if self.inside_quote || self.streaming {
-            MachineState::Printing(self.clone())
+            StateTransition::Stay
         } else {
             match *token {
                 Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::IdMarker => {
-                    MachineState::Printing(self.clone())
+                    StateTransition::Stay
                 }
-                _ => MachineState::travel(),
+                _ => StateTransition::Transition(MachineState::travel()),
             }
         }
     }
@@ -299,7 +305,7 @@ impl MachineStateExecutor for InputWaitingState {
         todo!()
     }
 
-    fn next(&mut self, _dot: &mut Dot, _token: &Token) -> MachineState {
+    fn next(&mut self, _dot: &mut Dot, _token: &Token) -> StateTransition {
         todo!()
     }
 }
