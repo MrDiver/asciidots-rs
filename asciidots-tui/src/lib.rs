@@ -201,6 +201,34 @@ impl RatatuiView {
                 self.running = false;
                 Some(AppCommand::Reset)
             }
+            KeyEvent {
+                code: KeyCode::Char('n'),
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.running = false;
+                Some(AppCommand::Step)
+            }
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                kind: KeyEventKind::Press,
+                ..
+            } => Some(AppCommand::AdjustSpeed(10)),
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                kind: KeyEventKind::Press,
+                ..
+            } => Some(AppCommand::AdjustSpeed(-10)),
+            KeyEvent {
+                code: KeyCode::Char('u'),
+                kind: KeyEventKind::Press,
+                ..
+            } => Some(AppCommand::AdjustStepsPerFrame(-1)),
+            KeyEvent {
+                code: KeyCode::Char('i'),
+                kind: KeyEventKind::Press,
+                ..
+            } => Some(AppCommand::AdjustStepsPerFrame(1)),
             _ => None,
         }
     }
@@ -244,9 +272,9 @@ impl DotsView for RatatuiView {
                 let settings_inner = settings_block.inner(cols[1]);
                 frame.render_widget(settings_block, cols[1]);
                 let text = Text::raw(format!(
-                    "Running: {}\nTick Speed: {:?}\nSteps/Frame: {}\nDots: {}",
+                    "Running: {}\nTick Speed: {} ms\nSteps/Tick: {}\nDots: {}\n\nControls:\nSpace: Run/Pause\nn: Single Step\nr: Reset\nj/k: Delay +/-10ms\nu/i: Steps/Tick -/+1\nwasd: Scroll\nEsc: Quit",
                     if controller.is_running() { "Yes" } else { "No" },
-                    controller.tick_speed(),
+                    controller.tick_speed().as_millis(),
                     controller.steps_per_frame(),
                     controller.num_dots(),
                 ));

@@ -13,7 +13,8 @@ pub enum AppCommand {
     Pause,
     Start,
     Reset,
-    SetSpeed(Duration),
+    AdjustSpeed(i64),
+    AdjustStepsPerFrame(i32),
     StopProgram,
 }
 
@@ -27,6 +28,11 @@ pub struct RuntimeController {
 }
 
 impl RuntimeController {
+    const MIN_TICK_MS: u64 = 0;
+    const MAX_TICK_MS: u64 = 5_000;
+    const MIN_STEPS_PER_FRAME: usize = 1;
+    const MAX_STEPS_PER_FRAME: usize = 10_000;
+
     pub fn new(content: &str) -> Result<Self, Vec<LexError>> {
         let interpreter = DotsInterpreter::from_string(content)?;
         Ok(Self {
@@ -47,15 +53,42 @@ impl RuntimeController {
         }
     }
 
+    fn run_steps(&mut self, count: usize) -> Vec<InterpreterResult> {
+        for _ in 0..count {
+            if self.interpreter.num_dots() == 0 {
+                break;
+            }
+            let results = self.interpreter.step().unwrap().to_vec();
+            if !results.is_empty() {
+                return results;
+            }
+        }
+        Vec::new()
+    }
+
+    fn set_tick_speed_ms(&mut self, ms: u64) {
+        let clamped = ms.clamp(Self::MIN_TICK_MS, Self::MAX_TICK_MS);
+        self.tick_speed = Duration::from_millis(clamped);
+        self.clock = Instant::now();
+    }
+
+    fn adjust_tick_speed_ms(&mut self, delta_ms: i64) {
+        let current = self.tick_speed.as_millis() as i64;
+        let next = (current + delta_ms).clamp(Self::MIN_TICK_MS as i64, Self::MAX_TICK_MS as i64);
+        self.set_tick_speed_ms(next as u64);
+    }
+
+    fn adjust_steps_per_frame(&mut self, delta: i32) {
+        let current = self.steps_per_frame as i32;
+        let next = (current + delta)
+            .clamp(Self::MIN_STEPS_PER_FRAME as i32, Self::MAX_STEPS_PER_FRAME as i32);
+        self.steps_per_frame = next as usize;
+    }
+
     pub fn tick(&mut self) -> Vec<InterpreterResult> {
         if self.running && self.clock.elapsed() >= self.tick_speed {
-            for _ in 0..self.steps_per_frame {
-                let results = self.interpreter.step().unwrap().to_vec();
-                if !results.is_empty() {
-                    return results;
-                }
-            }
             self.clock = Instant::now();
+            return self.run_steps(self.steps_per_frame);
         }
         Vec::new()
     }
@@ -63,7 +96,7 @@ impl RuntimeController {
     pub fn handle_command(&mut self, command: AppCommand) {
         match command {
             AppCommand::Step => {
-                self.interpreter.step().unwrap();
+                self.run_steps(1);
             }
             AppCommand::Reverse => {
                 todo!()
@@ -77,8 +110,11 @@ impl RuntimeController {
             AppCommand::Reset => {
                 self.reset();
             }
-            AppCommand::SetSpeed(speed) => {
-                self.tick_speed = speed;
+            AppCommand::AdjustSpeed(delta_ms) => {
+                self.adjust_tick_speed_ms(delta_ms);
+            }
+            AppCommand::AdjustStepsPerFrame(delta) => {
+                self.adjust_steps_per_frame(delta);
             }
             AppCommand::StopProgram => {
                 // Handled by caller
