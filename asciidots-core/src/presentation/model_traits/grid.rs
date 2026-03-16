@@ -4,6 +4,8 @@ pub enum GridCellKind {
     Quote,
     OperatorDelimiter,
     Operator,
+    ActiveOperator,
+    Command,
     ActiveDot,
 }
 

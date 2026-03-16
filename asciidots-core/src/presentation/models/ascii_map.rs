@@ -48,8 +48,16 @@ impl GridModel for AsciiMapModel<'_> {
         } else {
             match token {
                 Token::Quote => GridCellKind::Quote,
+                Token::QuoteStream => GridCellKind::Quote,
                 Token::OperatorBegin(_) | Token::OperatorEnd(_) => GridCellKind::OperatorDelimiter,
                 Token::Operator { .. } => GridCellKind::Operator,
+                Token::Digit(_) => GridCellKind::ActiveOperator,
+                Token::Char(_) => GridCellKind::ActiveOperator,
+                Token::Duplicate => GridCellKind::Command,
+                Token::Conditonal(_) => GridCellKind::Command,
+                Token::ValueMarker => GridCellKind::Command,
+                Token::Write => GridCellKind::Command,
+                Token::Read => GridCellKind::Command,
                 _ => GridCellKind::Default,
             }
         };

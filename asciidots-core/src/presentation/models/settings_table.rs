@@ -29,26 +29,26 @@ impl SettingsTableModel {
 
         let rows = vec![
             [
-                TableCell::new("Running", TableCellKind::OperatorDelimiter).with_bold(true),
+                TableCell::new("Running", TableCellKind::Changeable).with_bold(true),
                 running_cell,
             ],
             [
-                TableCell::new("Tick Speed", TableCellKind::OperatorDelimiter),
+                TableCell::new("Tick Speed", TableCellKind::Changeable),
                 TableCell::new(
                     format!("{} ms", tick_speed.as_millis()),
                     TableCellKind::Default,
                 ),
             ],
             [
-                TableCell::new("Steps/Tick", TableCellKind::OperatorDelimiter),
+                TableCell::new("Steps/Tick", TableCellKind::Changeable),
                 TableCell::new(format!("{steps_per_tick}"), TableCellKind::Default),
             ],
             [
-                TableCell::new("Ticks", TableCellKind::OperatorDelimiter),
-                TableCell::new(format!("{tick_count}"), TableCellKind::Operator),
+                TableCell::new("Ticks", TableCellKind::Changeable),
+                TableCell::new(format!("{tick_count}"), TableCellKind::Changing),
             ],
             [
-                TableCell::new("Last Step", TableCellKind::OperatorDelimiter),
+                TableCell::new("Last Step", TableCellKind::Changeable),
                 TableCell::new(format!("{:?}", last_step_duration), TableCellKind::Default),
             ],
             [

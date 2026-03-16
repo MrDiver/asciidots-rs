@@ -77,7 +77,9 @@ fn style_for_grid_cell_kind(kind: GridCellKind) -> Style {
         GridCellKind::Quote => RGB::MINT,
         GridCellKind::OperatorDelimiter => RGB::LEMON,
         GridCellKind::Operator => RGB::WHITE,
+        GridCellKind::Command => RGB::PERIWINKLE,
         GridCellKind::ActiveDot => RGB::CORAL,
+        GridCellKind::ActiveOperator => RGB::MINT,
     };
 
     Style::default().fg(foreground.into())
@@ -91,8 +93,8 @@ fn style_for_table_cell_kind(kind: TableCellKind) -> Style {
     let foreground = match kind {
         TableCellKind::Default => RGB::GRAY_500,
         TableCellKind::Quote => RGB::MINT,
-        TableCellKind::OperatorDelimiter => RGB::LEMON,
-        TableCellKind::Operator => RGB::WHITE,
+        TableCellKind::Changeable => RGB::LEMON,
+        TableCellKind::Changing => RGB::WHITE,
         TableCellKind::Active => RGB::CORAL,
     };
 
@@ -117,8 +119,8 @@ fn style_for_list_cell_kind(kind: ListCellKind) -> Style {
     let foreground = match kind {
         ListCellKind::Default => RGB::GRAY_500,
         ListCellKind::Quote => RGB::MINT,
-        ListCellKind::OperatorDelimiter => RGB::LEMON,
-        ListCellKind::Operator => RGB::WHITE,
+        ListCellKind::Changeable => RGB::LEMON,
+        ListCellKind::Changing => RGB::WHITE,
         ListCellKind::Active => RGB::CORAL,
     };
 

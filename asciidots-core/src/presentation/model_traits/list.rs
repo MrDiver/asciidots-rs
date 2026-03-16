@@ -2,8 +2,8 @@
 pub enum ListCellKind {
     Default,
     Quote,
-    OperatorDelimiter,
-    Operator,
+    Changeable,
+    Changing,
     Active,
 }
 

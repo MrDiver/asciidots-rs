@@ -20,7 +20,7 @@ impl OutputEntry {
     pub fn system(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            kind: ListCellKind::OperatorDelimiter,
+            kind: ListCellKind::Changeable,
         }
     }
 }
@@ -63,7 +63,7 @@ impl OutputListModel {
             .iter()
             .map(|entry| {
                 let mut cell = ListCell::new(entry.text.clone(), entry.kind);
-                if matches!(entry.kind, ListCellKind::OperatorDelimiter) {
+                if matches!(entry.kind, ListCellKind::Changeable) {
                     cell = cell.with_bold(true);
                 }
                 cell

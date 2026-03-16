@@ -14,7 +14,7 @@ impl DotDebugTableModel {
             .iter()
             .map(|dot| {
                 [
-                    TableCell::new(format!("{}", dot.id()), TableCellKind::Operator),
+                    TableCell::new(format!("{}", dot.id()), TableCellKind::Changing),
                     TableCell::new(format!("{:.2}", dot.value()), TableCellKind::Default),
                     TableCell::new(format!("{}", dot.position().x), TableCellKind::Quote),
                     TableCell::new(format!("{}", dot.position().y), TableCellKind::Quote),

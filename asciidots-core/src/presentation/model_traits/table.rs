@@ -2,8 +2,8 @@
 pub enum TableCellKind {
     Default,
     Quote,
-    OperatorDelimiter,
-    Operator,
+    Changeable,
+    Changing,
     Active,
 }
 
