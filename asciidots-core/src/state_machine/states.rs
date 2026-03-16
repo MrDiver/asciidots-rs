@@ -52,6 +52,17 @@ impl MachineState {
         MachineState::Travel(TravelState)
     }
 
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            MachineState::Travel(_) => "trav",
+            MachineState::Set(_) => "set",
+            MachineState::Dead(_) => "dead",
+            MachineState::Waiting(_) => "wait",
+            MachineState::Printing(_) => "print",
+            MachineState::InputWaiting(_) => "input",
+        }
+    }
+
     pub(super) fn set(kind: SetKind) -> Self {
         MachineState::Set(SetState { kind, acc: 0 })
     }

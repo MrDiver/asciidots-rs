@@ -48,6 +48,14 @@ impl DotMachine {
         self.dot.value
     }
 
+    pub fn id(&self) -> u64 {
+        self.dot.id
+    }
+
+    pub fn state_label(&self) -> &'static str {
+        self.state.short_name()
+    }
+
     pub fn dot(&self) -> Dot {
         self.dot
     }

@@ -5,7 +5,7 @@ use crate::{
     parser::LexError,
 };
 
-use super::models::{AsciiMapModel, SettingsTableModel};
+use super::models::{AsciiMapModel, DotDebugTableModel, SettingsTableModel};
 
 pub enum AppCommand {
     Step,
@@ -144,6 +144,10 @@ impl RuntimeController {
             self.last_step_duration,
             self.interpreter.num_dots(),
         )
+    }
+
+    pub fn dot_debug_table_model(&self) -> DotDebugTableModel {
+        DotDebugTableModel::from_dots(self.interpreter.get_dots())
     }
 
     pub fn is_running(&self) -> bool {

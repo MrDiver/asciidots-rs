@@ -276,6 +276,10 @@ impl DotsView for RatatuiView {
                     .direction(Direction::Horizontal)
                     .constraints(Constraint::from_ratios([(2, 3), (1, 3)]))
                     .split(area);
+                let side_rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+                    .split(cols[1]);
                 let program_block = Block::default()
                     .title("Program")
                     .borders(Borders::ALL)
@@ -295,8 +299,8 @@ impl DotsView for RatatuiView {
                     .title("Status")
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(RGB::SKY.into()));
-                let settings_inner = settings_block.inner(cols[1]);
-                frame.render_widget(settings_block, cols[1]);
+                let settings_inner = settings_block.inner(side_rows[0]);
+                frame.render_widget(settings_block, side_rows[0]);
                 let settings_model = controller.settings_table_model();
 
                 let header_cells = (0..settings_model.column_count())
@@ -334,6 +338,56 @@ impl DotsView for RatatuiView {
                 .column_spacing(1);
 
                 frame.render_widget(table, settings_inner);
+
+                let dots_block = Block::default()
+                    .title("Dots")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(RGB::PEACH.into()));
+                let dots_inner = dots_block.inner(side_rows[1]);
+                frame.render_widget(dots_block, side_rows[1]);
+                let dots_model = controller.dot_debug_table_model();
+
+                let dot_header_cells = (0..dots_model.column_count())
+                    .map(|column| {
+                        let text = dots_model.header(column).unwrap_or("");
+                        Cell::from(text).style(
+                            Style::default()
+                                .fg(RGB::PEACH.into())
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let dot_rows = (0..dots_model.row_count())
+                    .map(|row| {
+                        let cells = (0..dots_model.column_count())
+                            .map(|column| {
+                                if let Some(table_cell) = dots_model.get_cell(row, column) {
+                                    let style = style_for_table_cell(&table_cell);
+                                    Cell::from(table_cell.text).style(style)
+                                } else {
+                                    Cell::from("")
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        Row::new(cells)
+                    })
+                    .collect::<Vec<_>>();
+
+                let dots_table = Table::new(
+                    dot_rows,
+                    [
+                        Constraint::Length(4),
+                        Constraint::Length(8),
+                        Constraint::Length(4),
+                        Constraint::Length(4),
+                        Constraint::Min(6),
+                    ],
+                )
+                .header(Row::new(dot_header_cells))
+                .column_spacing(1);
+
+                frame.render_widget(dots_table, dots_inner);
             })
             .unwrap();
     }

@@ -52,10 +52,6 @@ impl SettingsTableModel {
                 TableCell::new(format!("{:?}", last_step_duration), TableCellKind::Default),
             ],
             [
-                TableCell::new("Dots", TableCellKind::OperatorDelimiter),
-                TableCell::new(format!("{dots}"), TableCellKind::Operator),
-            ],
-            [
                 TableCell::new("Space", TableCellKind::Quote),
                 TableCell::new("Run/Pause", TableCellKind::Default),
             ],
