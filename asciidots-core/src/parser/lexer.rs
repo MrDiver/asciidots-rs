@@ -7,6 +7,7 @@ pub struct Lexer {
     grid: Vec<Vec<char>>,
     tokens: Vec<Vec<SpanToken>>,
     offsets: Vec<Vec<usize>>,
+    source_len: usize,
     diagnostics: Vec<LexError>,
 }
 
@@ -43,12 +44,27 @@ impl Lexer {
             grid,
             tokens,
             offsets,
+            source_len: source.len(),
             diagnostics: Vec::new(),
         }
     }
 
     fn span(&self, x: usize, y: usize, len: usize) -> SourceSpan {
-        let offset = self.offsets[y][x];
+        let fallback = self.source_len.saturating_sub(1);
+        let offset = if let Some(row_offsets) = self.offsets.get(y) {
+            if let Some(offset) = row_offsets.get(x).copied() {
+                offset
+            } else if let (Some(last_offset), Some(last_char)) = (
+                row_offsets.last().copied(),
+                self.grid.get(y).and_then(|row| row.last()).copied(),
+            ) {
+                last_offset + last_char.len_utf8()
+            } else {
+                fallback
+            }
+        } else {
+            fallback
+        };
         (offset, len).into()
     }
 
@@ -104,12 +120,15 @@ impl Lexer {
                     Orientation::Vertical,
                 )),
             },
-            ']' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
+            ']' => match x
+                .checked_sub(2)
+                .and_then(|idx| self.grid.get(y).and_then(|row| row.get(idx)))
+            {
                 Some('[') => Ok(Token::OperatorEnd(Orientation::Vertical)),
                 c => Err(LexError::missing_opening_brace(
                     *c.unwrap_or(&' '),
-                    self.span(x - 2, y, 1),
-                    self.span(x - 1, y, 2),
+                    self.span(x.saturating_sub(2), y, 1),
+                    self.span(x.saturating_sub(1), y, 2),
                     Orientation::Vertical,
                 )),
             },
@@ -122,12 +141,15 @@ impl Lexer {
                     Orientation::Horizontal,
                 )),
             },
-            '}' => match self.grid.get(y).and_then(|row| row.get(x - 2)) {
+            '}' => match x
+                .checked_sub(2)
+                .and_then(|idx| self.grid.get(y).and_then(|row| row.get(idx)))
+            {
                 Some('{') => Ok(Token::OperatorEnd(Orientation::Horizontal)),
                 c => Err(LexError::missing_opening_brace(
                     *c.unwrap_or(&' '),
-                    self.span(x - 2, y, 1),
-                    self.span(x - 1, y, 2),
+                    self.span(x.saturating_sub(2), y, 1),
+                    self.span(x.saturating_sub(1), y, 2),
                     Orientation::Horizontal,
                 )),
             },
@@ -140,7 +162,7 @@ impl Lexer {
             '~' => match self.grid.get(y + 1).and_then(|row| row.get(x)) {
                 Some('!') => Ok(Token::Conditonal(true)),
                 Some(_) => Ok(Token::Conditonal(false)),
-                _ => Err(LexError::missing_conditional_path(self.span(x, y + 1, 1))),
+                _ => Err(LexError::missing_conditional_path(self.span(x, y, 1))),
             },
             '!' => Ok(Token::Negate),
             '"' => Ok(Token::Quote),

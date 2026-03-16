@@ -4,7 +4,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Diagnostic, Clone)]
 pub enum LexError {
-    #[error("missing opening brace for operator found '{ch_expected}' instead ")]
+    #[error("missing opening brace for operator found '{ch_found}' instead")]
     #[diagnostic(help("operators need braces: try '{expected_full}'"))]
     MissingOpeningBrace {
         ch_expected: char,
@@ -15,7 +15,7 @@ pub enum LexError {
         #[label("operator")]
         op_span: SourceSpan,
     },
-    #[error("missing closing brace for operator found '{ch_expected}' instead ")]
+    #[error("missing closing brace for operator found '{ch_found}' instead")]
     #[diagnostic(help("operators need braces: try '{expected_full}'"))]
     MissingClosingBrace {
         ch_expected: char,
