@@ -33,7 +33,11 @@ impl AsciiField {
                 field.push(SpanToken::new(Token::Empty, x, y, ' ', 0));
             }
         }
-        Ok(AsciiField { field, width, height })
+        Ok(AsciiField {
+            field,
+            width,
+            height,
+        })
     }
 
     pub fn get_field(&self) -> &[SpanToken] {
@@ -55,6 +59,19 @@ impl AsciiField {
             return Token::Empty;
         }
         *self.field[y * self.width + x].inner()
+    }
+
+    #[inline]
+    pub fn at_spanned(&self, position: &Position) -> SpanToken {
+        let &Position { x, y } = position;
+        if x < 0 || y < 0 {
+            return SpanToken::new(Token::Empty, x as usize, y as usize, ' ', 0);
+        }
+        let (x, y) = (x as usize, y as usize);
+        if x >= self.width || y >= self.height {
+            return SpanToken::new(Token::Empty, x as usize, y as usize, ' ', 0);
+        }
+        self.field[y * self.width + x]
     }
 
     pub fn offset(&self, position: &Position) -> usize {

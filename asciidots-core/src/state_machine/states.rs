@@ -1,8 +1,9 @@
 use super::dot::Dot;
-use super::event::{MachineEvent, RuntimeErrorKind};
+use super::error::RuntimeDiagnostic;
+use super::event::MachineEvent;
 use super::machine::DotMachine;
 use crate::{
-    parser::{MirrorKind, Token},
+    parser::{MirrorKind, SpanToken, Token},
     primitives::{Direction, Orientation, Position},
 };
 
@@ -34,6 +35,12 @@ pub struct PrintingState {
     pub(super) accumulator: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AssertingState {
+    inside_quote: bool,
+    accumulator: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct InputWaitingState;
 
@@ -44,6 +51,7 @@ pub enum MachineState {
     Dead(DeadState),
     Waiting(WaitingState),
     Printing(PrintingState),
+    Asserting(AssertingState),
     InputWaiting(InputWaitingState),
 }
 
@@ -59,6 +67,7 @@ impl MachineState {
             MachineState::Dead(_) => "dead",
             MachineState::Waiting(_) => "wait",
             MachineState::Printing(_) => "print",
+            MachineState::Asserting(_) => "assert",
             MachineState::InputWaiting(_) => "input",
         }
     }
@@ -82,16 +91,23 @@ impl MachineState {
             inside_quote: false,
         })
     }
+
+    pub(super) fn asserting() -> MachineState {
+        MachineState::Asserting(AssertingState {
+            accumulator: String::default(),
+            inside_quote: false,
+        })
+    }
 }
 
 pub trait MachineStateExecutor {
     fn process(
         &mut self,
         dot: &mut Dot,
-        token: &Token,
+        token: &SpanToken,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind>;
-    fn next(&mut self, dot: &mut Dot, token: &Token) -> StateTransition;
+    ) -> Result<MachineEvent, RuntimeDiagnostic>;
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition;
 }
 
 pub enum StateTransition {
@@ -103,14 +119,14 @@ impl MachineStateExecutor for TravelState {
     fn process(
         &mut self,
         dot: &mut Dot,
-        token: &Token,
+        token: &SpanToken,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
-        match *token {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        match token.inner() {
             Token::Dot => {
                 dot.step();
             }
-            Token::Pipe(orientation) if orientation == dot.orientation() => {
+            Token::Pipe(orientation) if *orientation == dot.orientation() => {
                 dot.step();
             }
             Token::CrossPipe => {
@@ -118,7 +134,7 @@ impl MachineStateExecutor for TravelState {
             }
             Token::ForceDirection(dir) => {
                 if dot.direction.orthogonal(&dir) {
-                    dot.set_dir(dir);
+                    dot.set_dir(*dir);
                 }
                 dot.step();
             }
@@ -174,12 +190,13 @@ impl MachineStateExecutor for TravelState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
-        match *token {
+    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        match token.inner() {
             Token::Empty => StateTransition::Transition(MachineState::dead()),
             Token::ValueMarker => StateTransition::Transition(MachineState::set(SetKind::Value)),
             Token::IdMarker => StateTransition::Transition(MachineState::set(SetKind::Id)),
             Token::Write => StateTransition::Transition(MachineState::printing()),
+            Token::Assertion => StateTransition::Transition(MachineState::asserting()),
             _ => StateTransition::Stay,
         }
     }
@@ -189,12 +206,12 @@ impl MachineStateExecutor for SetState {
     fn process(
         &mut self,
         dot: &mut Dot,
-        token: &Token,
+        token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
-        match *token {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        match token.inner() {
             Token::Digit(d) => {
-                self.acc = self.acc * 10 + d as u64;
+                self.acc = self.acc * 10 + *d as u64;
                 dot.step();
             }
             _ => {
@@ -204,8 +221,8 @@ impl MachineStateExecutor for SetState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, dot: &mut Dot, token: &Token) -> StateTransition {
-        match *token {
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        match token.inner() {
             Token::Digit(_) => StateTransition::Stay,
             _ => {
                 match self.kind {
@@ -222,10 +239,10 @@ impl MachineStateExecutor for WaitingState {
     fn process(
         &mut self,
         dot: &mut Dot,
-        token: &Token,
+        token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
-        match *token {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        match token.inner() {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) | Token::Operator { .. } => {
                 dot.step();
             }
@@ -236,8 +253,8 @@ impl MachineStateExecutor for WaitingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
-        match token {
+    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        match token.inner() {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) => StateTransition::Stay,
             _ => StateTransition::Transition(MachineState::travel()),
         }
@@ -248,26 +265,26 @@ impl MachineStateExecutor for PrintingState {
     fn process(
         &mut self,
         dot: &mut Dot,
-        token: &Token,
+        token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
         if self.inside_quote {
             dot.step();
-            if *token == Token::Quote {
+            if *token.inner() == Token::Quote {
                 self.inside_quote = false;
                 return Ok(MachineEvent::PrintLn(std::mem::take(&mut self.accumulator)));
             }
-            self.accumulator.push(char::from(*token));
+            self.accumulator.push(char::from(*token.inner()));
             return Ok(MachineEvent::Nothing);
         } else if self.streaming {
             dot.step();
-            if *token == Token::QuoteStream {
+            if *token.inner() == Token::QuoteStream {
                 self.streaming = false;
                 return Ok(MachineEvent::PrintLn(String::new()));
             }
-            return Ok(MachineEvent::PrintChar(char::from(*token)));
+            return Ok(MachineEvent::PrintChar(char::from(*token.inner())));
         }
-        match *token {
+        match token.inner() {
             Token::Write => {
                 dot.step();
             }
@@ -287,16 +304,21 @@ impl MachineStateExecutor for PrintingState {
                 dot.step();
                 self.inside_quote = true;
             }
-            c => return Err(RuntimeErrorKind::InvalidPrintingModifier(c)),
+            c => {
+                return Err(RuntimeDiagnostic::invalid_printing_modifier(
+                    *c,
+                    (token.offset(), 1).into(),
+                ));
+            }
         };
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &Token) -> StateTransition {
+    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
         if self.inside_quote || self.streaming {
             StateTransition::Stay
         } else {
-            match *token {
+            match token.inner() {
                 Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::IdMarker => {
                     StateTransition::Stay
                 }
@@ -310,13 +332,69 @@ impl MachineStateExecutor for InputWaitingState {
     fn process(
         &mut self,
         _dot: &mut Dot,
-        _token: &Token,
+        _token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
         todo!()
     }
 
-    fn next(&mut self, _dot: &mut Dot, _token: &Token) -> StateTransition {
+    fn next(&mut self, _dot: &mut Dot, _token: &SpanToken) -> StateTransition {
         todo!()
     }
 }
+
+impl MachineStateExecutor for AssertingState {
+    fn process(
+        &mut self,
+        dot: &mut Dot,
+        token: &SpanToken,
+        _pending_dots: &mut Vec<DotMachine>,
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        dot.step();
+        if self.inside_quote {
+            if matches!(token.inner(), Token::Quote | Token::QuoteStream) {
+                self.inside_quote = false;
+                let expected: f64 = self.accumulator.parse().or_else(|_| {
+                    Err(RuntimeDiagnostic::failed_to_parse_assert(
+                        std::mem::take(&mut self.accumulator),
+                        {
+                            let len = self.accumulator.len();
+                            (token.offset() - len, len).into()
+                        },
+                    ))
+                })?;
+                if dot.value == expected {
+                    Ok(MachineEvent::Nothing)
+                } else {
+                    Ok(MachineEvent::AssertionFailed {
+                        expected,
+                        found: dot.value,
+                    })
+                }
+            } else {
+                self.accumulator.push(char::from(*token.inner()));
+                Ok(MachineEvent::Nothing)
+            }
+        } else {
+            match token.inner() {
+                Token::Quote | Token::QuoteStream => {
+                    self.inside_quote = true;
+                }
+                _ => {}
+            }
+            Ok(MachineEvent::Nothing)
+        }
+    }
+
+    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        if self.inside_quote {
+            StateTransition::Stay
+        } else {
+            match token.inner() {
+                Token::Quote | Token::QuoteStream => StateTransition::Stay,
+                _ => StateTransition::Transition(MachineState::travel()),
+            }
+        }
+    }
+}
+

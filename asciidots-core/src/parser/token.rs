@@ -35,6 +35,7 @@ pub enum Token {
     Duplicate,                 // Standalone *
     Digit(u8),                 // Any digit 1-9
     Char(char),                // Any Char
+    Assertion, // Standalone =, Can be used for assertions which throw an error if not met, but otherwise do nothing.
 }
 
 impl std::fmt::Display for Token {
@@ -77,6 +78,7 @@ impl std::fmt::Display for Token {
             Token::Duplicate => write!(f, "*"),
             Token::Digit(d) => write!(f, "{}", d),
             Token::Char(c) => write!(f, "{}", c),
+            Token::Assertion => write!(f, "="),
         }
     }
 }
@@ -121,6 +123,7 @@ impl From<Token> for char {
             Token::Duplicate => '*',
             Token::Digit(d) => char::from_digit(d as u32, 10).unwrap_or('0'),
             Token::Char(c) => c,
+            Token::Assertion => '=',
         }
     }
 }
@@ -143,6 +146,16 @@ impl<T> Spanned<T> {
             inner: t,
             repr: c,
             offset,
+        }
+    }
+
+    pub fn temporary(token: Token) -> Spanned<Token> {
+        Spanned::<Token> {
+            col: 0,
+            line: 0,
+            inner: token,
+            repr: char::from(token),
+            offset: 0,
         }
     }
 

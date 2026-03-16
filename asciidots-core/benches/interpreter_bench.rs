@@ -1,6 +1,6 @@
 use asciidots_core::interpreter::{AsciiField, DotsInterpreter};
-use asciidots_core::parser::Lexer;
 use asciidots_core::parser::Token;
+use asciidots_core::parser::{Lexer, SpanToken};
 use asciidots_core::primitives::{Direction, Position};
 use asciidots_core::state_machine::{Dot, DotMachine};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
@@ -68,9 +68,10 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
         b.iter(|| {
             let mut dot = DotMachine::from(Dot::new(Direction::Right, Position::new(10, 10), 0.0));
             let token = Token::ForceDirection(Direction::Down);
+            let spanned = SpanToken::temporary(token);
             let mut pending_dots = Vec::with_capacity(2);
 
-            dot.run(black_box(&token), &mut pending_dots)
+            dot.run(black_box(&spanned), &mut pending_dots)
                 .expect("single-step interpreter benchmark should not fail");
 
             black_box(dot);

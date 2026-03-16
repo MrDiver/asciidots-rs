@@ -1,10 +1,11 @@
 use crate::{
-    parser::Token,
+    parser::{SpanToken, Token},
     primitives::{Direction, Position},
 };
 
 use super::dot::Dot;
-use super::event::{MachineEvent, RuntimeErrorKind};
+use super::error::RuntimeDiagnostic;
+use super::event::MachineEvent;
 use super::states::{MachineState, MachineStateExecutor, StateTransition};
 
 #[derive(Clone)]
@@ -66,24 +67,28 @@ impl DotMachine {
 
     pub fn run(
         &mut self,
-        token: &Token,
+        token: &SpanToken,
         pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeErrorKind> {
+    ) -> Result<MachineEvent, RuntimeDiagnostic> {
         match &mut self.state {
             MachineState::Travel(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Set(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Waiting(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Printing(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::InputWaiting(s) => s.process(&mut self.dot, token, pending_dots),
+            MachineState::Asserting(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Dead(_) => Ok(MachineEvent::Nothing),
         }
     }
 
-    pub fn next(&mut self, event: &MachineEvent, lookahead: &Token) {
+    pub fn next(&mut self, event: &MachineEvent, lookahead: &SpanToken) {
         let transition = match event {
             MachineEvent::Died => StateTransition::Transition(MachineState::dead()),
             MachineEvent::EndProgram => StateTransition::Transition(MachineState::dead()),
             MachineEvent::HitOperator => StateTransition::Transition(MachineState::waiting()),
+            MachineEvent::AssertionFailed { .. } => {
+                StateTransition::Transition(MachineState::dead())
+            }
             MachineEvent::Nothing
             | MachineEvent::PrintLn(_)
             | MachineEvent::PrintChar(_)
@@ -94,6 +99,7 @@ impl DotMachine {
                 MachineState::Waiting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Printing(s) => s.next(&mut self.dot, lookahead),
                 MachineState::InputWaiting(s) => s.next(&mut self.dot, lookahead),
+                MachineState::Asserting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Dead(_) => StateTransition::Transition(MachineState::dead()),
             },
         };

@@ -1,16 +1,13 @@
+use miette::SourceSpan;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    parser::{LexError, Token},
+    parser::{LexError, SpanToken, Token},
     primitives::{Direction, Position},
-    state_machine::{DotMachine, MachineEvent},
+    state_machine::{DotMachine, MachineEvent, RuntimeDiagnostic},
 };
 
-use super::{
-    error::RuntimeError,
-    field::AsciiField,
-    operators::OperatorQueues,
-};
+use super::{field::AsciiField, operators::OperatorQueues};
 
 #[derive(Debug, Clone)]
 pub enum InterpreterResult {
@@ -29,7 +26,7 @@ pub struct DotsInterpreter {
     field: AsciiField,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
-    diagnostics: Vec<RuntimeError>,
+    diagnostics: Vec<RuntimeDiagnostic>,
     operator_map: FxHashMap<(usize, usize), OperatorQueues>,
     results: Vec<InterpreterResult>,
 }
@@ -111,11 +108,11 @@ impl DotsInterpreter {
         let mut repeat_iteration = false;
         while i < self.dots.len() {
             let dot = &mut self.dots[i];
-            let token = &self.field.at(dot.position());
-            let event = match dot.run(token, &mut self.pending_dots) {
+            let token = self.field.at_spanned(dot.position());
+            let event = match dot.run(&token, &mut self.pending_dots) {
                 Ok(e) => e,
-                Err(_d) => {
-                    self.diagnostics.push(RuntimeError::None);
+                Err(d) => {
+                    self.diagnostics.push(d);
                     MachineEvent::EndProgram
                 }
             };
@@ -125,7 +122,11 @@ impl DotsInterpreter {
                 }
                 MachineEvent::HitOperator => {
                     let mut dot = self.dots.swap_remove(i);
-                    dot.next(&event, &Token::Empty);
+                    let pos = dot.position();
+                    dot.next(
+                        &event,
+                        &SpanToken::new(Token::Empty, pos.x as usize, pos.y as usize, ' ', 0),
+                    );
                     let opqueue = self
                         .operator_map
                         .get_mut(&(dot.position().into()))
@@ -138,21 +139,28 @@ impl DotsInterpreter {
                 }
                 MachineEvent::PrintLn(s) => {
                     self.results.push(InterpreterResult::PrintLn(s));
-                    let lookahead = self.field.at(dot.position());
+                    let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
                 MachineEvent::PrintChar(c) => {
                     Self::push_print_char(&mut self.results, c);
-                    let lookahead = self.field.at(dot.position());
+                    let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
                 MachineEvent::Print(s) => {
                     Self::push_print(&mut self.results, s);
-                    let lookahead = self.field.at(dot.position());
+                    let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
+                MachineEvent::AssertionFailed { expected, found } => {
+                    self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
+                        expected,
+                        found,
+                        (self.field.at_spanned(dot.position()).offset(), 1).into(),
+                    ))
+                }
                 _ => {
-                    let lookahead = self.field.at(dot.position());
+                    let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&event, &lookahead)
                 }
             }
@@ -175,7 +183,7 @@ impl DotsInterpreter {
         }
     }
 
-    pub fn step(&mut self) -> Result<&[InterpreterResult], &[RuntimeError]> {
+    pub fn step(&mut self) -> Result<&[InterpreterResult], &[RuntimeDiagnostic]> {
         self.results.clear();
         self.interpret();
         Self::cleanup_dead_dots(&mut self.dots);
