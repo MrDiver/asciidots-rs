@@ -1,15 +1,15 @@
 use std::time::Duration;
 
 use asciidots_core::presentation::{
-    AppCommand, DotsView, GridCell, GridCellKind, GridModel, RuntimeController,
+    AppCommand, DotsView, GridCell, GridCellKind, GridModel, RuntimeController, TableCell,
+    TableCellKind, TableModel,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal,
     layout::{Constraint, Direction, Layout},
-    style::Style,
-    text::Text,
-    widgets::{Block, Borders, Clear, Widget},
+    style::{Modifier, Style},
+    widgets::{Block, Borders, Cell, Clear, Row, Table, Widget},
 };
 
 // ╔══════════════════════════════════════╗
@@ -80,6 +80,32 @@ fn style_for_grid_cell_kind(kind: GridCellKind) -> Style {
 
 fn style_for_grid_cell(cell: GridCell) -> Style {
     style_for_grid_cell_kind(cell.kind)
+}
+
+fn style_for_table_cell_kind(kind: TableCellKind) -> Style {
+    let foreground = match kind {
+        TableCellKind::Default => RGB::GRAY_500,
+        TableCellKind::Quote => RGB::MINT,
+        TableCellKind::OperatorDelimiter => RGB::LEMON,
+        TableCellKind::Operator => RGB::WHITE,
+        TableCellKind::Active => RGB::CORAL,
+    };
+
+    Style::default().fg(foreground.into())
+}
+
+fn style_for_table_cell(cell: &TableCell) -> Style {
+    let mut style = style_for_table_cell_kind(cell.kind);
+    if cell.bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.underline {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.strikethrough {
+        style = style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    style
 }
 
 // ╔══════════════════════════════════════╗
@@ -271,14 +297,43 @@ impl DotsView for RatatuiView {
                     .border_style(Style::default().fg(RGB::SKY.into()));
                 let settings_inner = settings_block.inner(cols[1]);
                 frame.render_widget(settings_block, cols[1]);
-                let text = Text::raw(format!(
-                    "Running: {}\nTick Speed: {} ms\nSteps/Tick: {}\nDots: {}\n\nControls:\nSpace: Run/Pause\nn: Single Step\nr: Reset\nj/k: Delay +/-10ms\nu/i: Steps/Tick -/+1\nwasd: Scroll\nEsc: Quit",
-                    if controller.is_running() { "Yes" } else { "No" },
-                    controller.tick_speed().as_millis(),
-                    controller.steps_per_frame(),
-                    controller.num_dots(),
-                ));
-                frame.render_widget(text, settings_inner);
+                let settings_model = controller.settings_table_model();
+
+                let header_cells = (0..settings_model.column_count())
+                    .map(|column| {
+                        let text = settings_model.header(column).unwrap_or("");
+                        Cell::from(text).style(
+                            Style::default()
+                                .fg(RGB::SKY.into())
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let rows = (0..settings_model.row_count())
+                    .map(|row| {
+                        let cells = (0..settings_model.column_count())
+                            .map(|column| {
+                                if let Some(table_cell) = settings_model.get_cell(row, column) {
+                                    let style = style_for_table_cell(&table_cell);
+                                    Cell::from(table_cell.text).style(style)
+                                } else {
+                                    Cell::from("")
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        Row::new(cells)
+                    })
+                    .collect::<Vec<_>>();
+
+                let table = Table::new(
+                    rows,
+                    [Constraint::Percentage(35), Constraint::Percentage(65)],
+                )
+                .header(Row::new(header_cells))
+                .column_spacing(1);
+
+                frame.render_widget(table, settings_inner);
             })
             .unwrap();
     }

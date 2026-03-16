@@ -5,7 +5,7 @@ use crate::{
     parser::LexError,
 };
 
-use super::models::AsciiMapModel;
+use super::models::{AsciiMapModel, SettingsTableModel};
 
 pub enum AppCommand {
     Step,
@@ -23,6 +23,8 @@ pub struct RuntimeController {
     source: String,
     tick_speed: Duration,
     steps_per_frame: usize,
+    tick_count: usize,
+    last_step_duration: Duration,
     running: bool,
     clock: Instant,
 }
@@ -40,6 +42,8 @@ impl RuntimeController {
             source: content.to_string(),
             tick_speed: Duration::from_millis(100),
             steps_per_frame: 1,
+            tick_count: 0,
+            last_step_duration: Duration::ZERO,
             running: false,
             clock: Instant::now(),
         })
@@ -48,6 +52,8 @@ impl RuntimeController {
     pub fn reset(&mut self) {
         if let Ok(interpreter) = DotsInterpreter::from_string(&self.source) {
             self.interpreter = interpreter;
+            self.tick_count = 0;
+            self.last_step_duration = Duration::ZERO;
             self.running = false;
             self.clock = Instant::now();
         }
@@ -58,7 +64,10 @@ impl RuntimeController {
             if self.interpreter.num_dots() == 0 {
                 break;
             }
+            let start = Instant::now();
             let results = self.interpreter.step().unwrap().to_vec();
+            self.last_step_duration = start.elapsed();
+            self.tick_count += 1;
             if !results.is_empty() {
                 return results;
             }
@@ -126,6 +135,17 @@ impl RuntimeController {
         AsciiMapModel::new(self.interpreter.get_field(), self.interpreter.get_dots())
     }
 
+    pub fn settings_table_model(&self) -> SettingsTableModel {
+        SettingsTableModel::from_runtime_state(
+            self.running,
+            self.tick_speed,
+            self.steps_per_frame,
+            self.tick_count,
+            self.last_step_duration,
+            self.interpreter.num_dots(),
+        )
+    }
+
     pub fn is_running(&self) -> bool {
         self.running
     }
@@ -140,6 +160,14 @@ impl RuntimeController {
 
     pub fn num_dots(&self) -> usize {
         self.interpreter.num_dots()
+    }
+
+    pub fn tick_count(&self) -> usize {
+        self.tick_count
+    }
+
+    pub fn last_step_duration(&self) -> Duration {
+        self.last_step_duration
     }
 }
 
