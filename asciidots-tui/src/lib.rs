@@ -1,15 +1,20 @@
 use std::time::Duration;
 
+use asciidots_core::interpreter::InterpreterResult;
 use asciidots_core::presentation::{
-    AppCommand, DotsView, GridCell, GridCellKind, GridModel, RuntimeController, TableCell,
-    TableCellKind, TableModel,
+    AppCommand, DotsView, GridCell, GridCellKind, GridModel, ListCell, ListCellKind, ListModel,
+    OutputEntry, OutputListModel, RuntimeController, TableCell, TableCellKind, TableModel,
+    apply_result_to_output,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal,
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Cell, Clear, Row, Table, Widget},
+    widgets::{
+        Block, Borders, Cell, Clear, List, ListItem, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, Widget,
+    },
 };
 
 // ╔══════════════════════════════════════╗
@@ -108,6 +113,32 @@ fn style_for_table_cell(cell: &TableCell) -> Style {
     style
 }
 
+fn style_for_list_cell_kind(kind: ListCellKind) -> Style {
+    let foreground = match kind {
+        ListCellKind::Default => RGB::GRAY_500,
+        ListCellKind::Quote => RGB::MINT,
+        ListCellKind::OperatorDelimiter => RGB::LEMON,
+        ListCellKind::Operator => RGB::WHITE,
+        ListCellKind::Active => RGB::CORAL,
+    };
+
+    Style::default().fg(foreground.into())
+}
+
+fn style_for_list_cell(cell: &ListCell) -> Style {
+    let mut style = style_for_list_cell_kind(cell.kind);
+    if cell.bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.underline {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.strikethrough {
+        style = style.add_modifier(Modifier::CROSSED_OUT);
+    }
+    style
+}
+
 // ╔══════════════════════════════════════╗
 // ║                                      ║
 // ║             Grid Widget              ║
@@ -156,6 +187,10 @@ impl<'a> Widget for GridWidget<'a> {
 pub struct RatatuiView {
     term: DefaultTerminal,
     grid_scroll: (usize, usize),
+    output_scroll: usize,
+    output_follow: bool,
+    output_entries: Vec<OutputEntry>,
+    current_output_line: String,
     running: bool,
 }
 
@@ -164,8 +199,25 @@ impl RatatuiView {
         RatatuiView {
             term: ratatui::init(),
             grid_scroll: (0, 0),
+            output_scroll: 0,
+            output_follow: true,
+            output_entries: Vec::new(),
+            current_output_line: String::new(),
             running: false,
         }
+    }
+
+    fn process_results(&mut self, results: &[InterpreterResult]) {
+        for result in results {
+            apply_result_to_output(&mut self.output_entries, &mut self.current_output_line, result);
+        }
+    }
+
+    fn clear_output(&mut self) {
+        self.output_entries.clear();
+        self.current_output_line.clear();
+        self.output_scroll = 0;
+        self.output_follow = true;
     }
 
     fn handle_key_event(&mut self, event: &KeyEvent) -> Option<AppCommand> {
@@ -255,6 +307,40 @@ impl RatatuiView {
                 kind: KeyEventKind::Press,
                 ..
             } => Some(AppCommand::AdjustStepsPerFrame(1)),
+            KeyEvent {
+                code: KeyCode::Up,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.output_follow = false;
+                self.output_scroll = self.output_scroll.saturating_sub(1);
+                None
+            }
+            KeyEvent {
+                code: KeyCode::Down,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.output_scroll = self.output_scroll.saturating_add(1);
+                None
+            }
+            KeyEvent {
+                code: KeyCode::PageUp,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.output_follow = false;
+                self.output_scroll = self.output_scroll.saturating_sub(10);
+                None
+            }
+            KeyEvent {
+                code: KeyCode::PageDown,
+                kind: KeyEventKind::Press,
+                ..
+            } => {
+                self.output_scroll = self.output_scroll.saturating_add(10);
+                None
+            }
             _ => None,
         }
     }
@@ -278,7 +364,11 @@ impl DotsView for RatatuiView {
                     .split(area);
                 let side_rows = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+                    .constraints([
+                        Constraint::Percentage(28),
+                        Constraint::Percentage(28),
+                        Constraint::Percentage(44),
+                    ])
                     .split(cols[1]);
                 let program_block = Block::default()
                     .title("Program")
@@ -388,6 +478,49 @@ impl DotsView for RatatuiView {
                 .column_spacing(1);
 
                 frame.render_widget(dots_table, dots_inner);
+
+                let output_block = Block::default()
+                    .title("Output")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(RGB::SAGE.into()));
+                let output_inner = output_block.inner(side_rows[2]);
+                frame.render_widget(output_block, side_rows[2]);
+                let output_cols = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Min(1), Constraint::Length(1)])
+                    .split(output_inner);
+                let output_model = OutputListModel::from_output(&self.output_entries, &self.current_output_line);
+                let visible_count = output_cols[0].height as usize;
+                let total_items = output_model.item_count();
+                let max_scroll = total_items.saturating_sub(visible_count);
+                if self.output_follow {
+                    self.output_scroll = max_scroll;
+                } else {
+                    self.output_scroll = self.output_scroll.min(max_scroll);
+                    if self.output_scroll >= max_scroll {
+                        self.output_follow = true;
+                    }
+                }
+                let scroll = self.output_scroll;
+                let end = (scroll + visible_count).min(total_items);
+                let items = (scroll..end)
+                    .filter_map(|index| output_model.get_item(index))
+                    .map(|cell| {
+                        let style = style_for_list_cell(&cell);
+                        ListItem::new(cell.text).style(style)
+                    })
+                    .collect::<Vec<_>>();
+                let list = List::new(items);
+                frame.render_widget(list, output_cols[0]);
+
+                let mut scrollbar_state = ScrollbarState::default()
+                    .content_length(total_items.max(1))
+                    .position(scroll);
+                frame.render_stateful_widget(
+                    Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                    output_cols[1],
+                    &mut scrollbar_state,
+                );
             })
             .unwrap();
     }
@@ -413,9 +546,14 @@ pub fn run(content: &str) {
             if matches!(c, AppCommand::StopProgram) {
                 break;
             }
-            app.handle_command(c);
+            if matches!(c, AppCommand::Reset) {
+                view.clear_output();
+            }
+            let results = app.handle_command(c);
+            view.process_results(&results);
         }
-        app.tick();
+        let results = app.tick();
+        view.process_results(&results);
         view.render(&app)
     }
 }

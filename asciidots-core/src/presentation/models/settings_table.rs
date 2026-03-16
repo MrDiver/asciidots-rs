@@ -14,7 +14,7 @@ impl SettingsTableModel {
         steps_per_tick: usize,
         tick_count: usize,
         last_step_duration: Duration,
-        dots: usize,
+        _dots: usize,
     ) -> Self {
         let running_value = if running { "Yes" } else { "No" };
         let running_cell = TableCell::new(
@@ -70,6 +70,14 @@ impl SettingsTableModel {
             [
                 TableCell::new("u / i", TableCellKind::Quote),
                 TableCell::new("Steps/Tick -/+1", TableCellKind::Default),
+            ],
+            [
+                TableCell::new("↑ / ↓", TableCellKind::Quote),
+                TableCell::new("Output Scroll", TableCellKind::Default),
+            ],
+            [
+                TableCell::new("PgUp/PgDn", TableCellKind::Quote),
+                TableCell::new("Output Scroll +/-10", TableCellKind::Default),
             ],
             [
                 TableCell::new("wasd", TableCellKind::Quote),
