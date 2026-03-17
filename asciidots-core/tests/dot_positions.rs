@@ -12,7 +12,7 @@ const REFLECTOR_BOUNCE: &str = include_str!("fixtures/position_reflector_bounce.
 fn dot_moves_right_then_dies_at_boundary() {
     assert_positions_trace(
         STRAIGHT_RIGHT,
-        &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(3, 1)], &[]],
+        &[&[(0, 0)], &[(1, 0)], &[(2, 0)], &[(3, 0)], &[]],
     );
 }
 
@@ -25,7 +25,13 @@ fn mirror_turns_dot_downward() {
 fn duplicate_spawns_perpendicular_dots() {
     assert_positions_trace(
         DUPLICATE_SPLIT,
-        &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(2, 0), (2, 2)], &[]],
+        &[
+            &[(0, 1)],
+            &[(1, 1)],
+            &[(2, 1)],
+            &[(2, 0), (2, 2), (3, 1)],
+            &[],
+        ],
     );
 }
 
@@ -33,7 +39,7 @@ fn duplicate_spawns_perpendicular_dots() {
 fn force_direction_turns_and_moves_down() {
     assert_positions_trace(
         FORCE_DIRECTION_TURN,
-        &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(2, 2)], &[(2, 3)]],
+        &[&[(0, 0)], &[(1, 0)], &[(2, 0)], &[(2, 1)], &[(2, 2)]],
     );
 }
 
@@ -41,7 +47,7 @@ fn force_direction_turns_and_moves_down() {
 fn reflector_reverses_horizontal_direction() {
     assert_positions_trace(
         REFLECTOR_BOUNCE,
-        &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(1, 1)], &[(0, 1)], &[]],
+        &[&[(0, 0)], &[(1, 0)], &[(2, 0)], &[(1, 0)], &[(0, 0)], &[]],
     );
 }
 
@@ -50,10 +56,10 @@ fn value_trace_wrapper_validates_dot_values_per_tick() {
     assert_values_trace(
         STRAIGHT_RIGHT,
         &[
-            &[(0, 1, 0.0)],
-            &[(1, 1, 0.0)],
-            &[(2, 1, 0.0)],
-            &[(3, 1, 0.0)],
+            &[(0, 0, 0.0)],
+            &[(1, 0, 0.0)],
+            &[(2, 0, 0.0)],
+            &[(3, 0, 0.0)],
             &[],
         ],
     );

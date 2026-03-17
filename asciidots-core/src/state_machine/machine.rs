@@ -1,6 +1,9 @@
+use std::io::Empty;
+
 use crate::{
-    parser::SpanToken,
+    parser::{SpanToken, Token},
     primitives::{Direction, Position},
+    state_machine::states::SetKind,
 };
 
 use super::dot::Dot;
@@ -90,11 +93,15 @@ impl DotMachine {
 
     pub fn next(&mut self, event: &MachineEvent, lookahead: &SpanToken) {
         let transition = match event {
-            MachineEvent::Died => StateTransition::Transition(MachineState::dead()),
-            MachineEvent::EndProgram => StateTransition::Transition(MachineState::dead()),
-            MachineEvent::HitOperator => StateTransition::Transition(MachineState::waiting()),
-            MachineEvent::AssertionFailed { .. } => {
-                StateTransition::Transition(MachineState::dead())
+            MachineEvent::Died
+            | MachineEvent::EndProgram
+            | MachineEvent::AssertionFailed { .. } => {
+                self.state = MachineState::dead();
+                StateTransition::Stay
+            }
+            MachineEvent::HitOperator => {
+                self.state = MachineState::waiting();
+                StateTransition::Stay
             }
             MachineEvent::Nothing
             | MachineEvent::PrintLn(_)
@@ -105,12 +112,29 @@ impl DotMachine {
                 MachineState::Waiting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Printing(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Asserting(s) => s.next(&mut self.dot, lookahead),
-                MachineState::Dead(_) => StateTransition::Transition(MachineState::dead()),
+                MachineState::Dead(_) => {
+                    self.state = MachineState::dead();
+                    StateTransition::Stay
+                }
             },
         };
 
-        if let StateTransition::Transition(state) = transition {
-            self.state = state;
+        if let StateTransition::Transition = transition {
+            self.state = match lookahead.inner() {
+                Token::Empty => MachineState::dead(),
+                Token::ValueMarker => MachineState::set(SetKind::Value),
+                Token::AddrMarker => MachineState::set(SetKind::Addr),
+                Token::Write => MachineState::printing(),
+                Token::Pipe(_)
+                | Token::CrossPipe
+                | Token::Duplicate
+                | Token::Mirror(_)
+                | Token::ForceDirection(_)
+                | Token::OperatorBegin(_)
+                | Token::OperatorEnd(_)
+                | Token::Operator { .. } => MachineState::travel(),
+                _ => return,
+            }
         }
     }
 }

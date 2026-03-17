@@ -42,7 +42,7 @@ impl DotsInterpreter {
             operator_map: FxHashMap::default(),
             results: Vec::with_capacity(10),
         };
-        state.initalize();
+        state.initialize();
         Ok(state)
     }
 
@@ -50,16 +50,16 @@ impl DotsInterpreter {
         &self.field
     }
 
-    fn initalize(&mut self) {
+    fn initialize(&mut self) {
         for token in self.field.get_field() {
             let position = Position::new(token.col() as i32, token.line() as i32);
             match *token.inner() {
                 Token::Dot => {
                     for direction in &[
                         Direction::Up,
+                        Direction::Right,
                         Direction::Down,
                         Direction::Left,
-                        Direction::Right,
                     ] {
                         let offsetpos = position + (*direction).into();
                         match self.field.at(&offsetpos) {

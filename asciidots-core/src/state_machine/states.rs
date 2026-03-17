@@ -118,7 +118,7 @@ pub trait MachineStateExecutor {
 
 pub enum StateTransition {
     Stay,
-    Transition(MachineState),
+    Transition,
 }
 
 impl MachineStateExecutor for TravelState {
@@ -200,12 +200,19 @@ impl MachineStateExecutor for TravelState {
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Travel", dot.uuid);
         match token.inner() {
-            Token::Empty => StateTransition::Transition(MachineState::dead()),
-            Token::ValueMarker => StateTransition::Transition(MachineState::set(SetKind::Value)),
-            Token::AddrMarker => StateTransition::Transition(MachineState::set(SetKind::Addr)),
-            Token::Write => StateTransition::Transition(MachineState::printing()),
-            Token::Assertion => StateTransition::Transition(MachineState::asserting()),
-            _ => StateTransition::Stay,
+            Token::Pipe(_)
+            | Token::CrossPipe
+            | Token::Mirror(_)
+            | Token::ForceDirection(_)
+            | Token::Reflector(_)
+            | Token::Duplicate
+            | Token::Dot
+            | Token::Char(_)
+            | Token::Digit(_)
+            | Token::OperatorBegin(_)
+            | Token::OperatorEnd(_)
+            | Token::Operator { .. } => StateTransition::Stay,
+            _ => StateTransition::Transition,
         }
     }
 }
@@ -255,19 +262,18 @@ impl MachineStateExecutor for SetState {
             };
             dot.set_value(self.input.unwrap_or_else(|| unreachable!()));
             dot.step();
-            return StateTransition::Transition(MachineState::travel());
+            return StateTransition::Transition;
         } else if self.waiting_input {
             return StateTransition::Stay;
         }
         match token.inner() {
-            Token::Read => StateTransition::Stay,
-            Token::Digit(_) => StateTransition::Stay,
+            Token::Read | Token::Digit(_) => StateTransition::Stay,
             _ => {
                 match self.kind {
                     SetKind::Value => dot.set_value(self.acc as f64),
                     SetKind::Addr => dot.set_addr(self.acc),
                 };
-                StateTransition::Transition(MachineState::travel())
+                StateTransition::Transition
             }
         }
     }
@@ -296,7 +302,7 @@ impl MachineStateExecutor for WaitingState {
         trace!("[state{}] Next Waiting", dot.uuid);
         match token.inner() {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) => StateTransition::Stay,
-            _ => StateTransition::Transition(MachineState::travel()),
+            _ => StateTransition::Transition,
         }
     }
 }
@@ -367,7 +373,7 @@ impl MachineStateExecutor for PrintingState {
                     self.got_modifier = true;
                     StateTransition::Stay
                 }
-                _ => StateTransition::Transition(MachineState::travel()),
+                _ => StateTransition::Transition,
             }
         }
     }
@@ -424,7 +430,7 @@ impl MachineStateExecutor for AssertingState {
         } else {
             match token.inner() {
                 Token::Quote | Token::QuoteStream => StateTransition::Stay,
-                _ => StateTransition::Transition(MachineState::travel()),
+                _ => StateTransition::Transition,
             }
         }
     }
