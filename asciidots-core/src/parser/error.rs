@@ -4,33 +4,33 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Diagnostic, Clone)]
 pub enum LexError {
-    #[error("missing opening brace for operator found '{ch_found}' instead")]
-    #[diagnostic(help("operators need braces: try '{expected_full}'"))]
+    #[error("missing opening brace for operator found '{}' instead", _ch_found)]
+    #[diagnostic(help("operators need braces: try '{}'", _expected_full))]
     MissingOpeningBrace {
-        ch_expected: char,
-        ch_found: char,
-        expected_full: String,
-        #[label("Expected '{ch_expected}' here")]
-        at_span: SourceSpan,
+        _ch_expected: char,
+        _ch_found: char,
+        _expected_full: String,
+        #[label("Expected '{_ch_expected}' here")]
+        _at_span: SourceSpan,
         #[label("operator")]
-        op_span: SourceSpan,
+        _op_span: SourceSpan,
     },
-    #[error("missing closing brace for operator found '{ch_found}' instead")]
-    #[diagnostic(help("operators need braces: try '{expected_full}'"))]
+    #[error("missing closing brace for operator found '{}' instead", _ch_found)]
+    #[diagnostic(help("operators need braces: try '{}'", _expected_full))]
     MissingClosingBrace {
-        ch_expected: char,
-        ch_found: char,
-        expected_full: String,
-        #[label("Expected '{ch_expected}' here")]
-        at_span: SourceSpan,
+        _ch_expected: char,
+        _ch_found: char,
+        _expected_full: String,
+        #[label("Expected '{_ch_expected}' here")]
+        _at_span: SourceSpan,
         #[label("operator")]
-        op_span: SourceSpan,
+        _op_span: SourceSpan,
     },
     #[error("missing condition path (guaranteed deadlock)")]
     #[diagnostic(help(""))]
     MissingConditionalPath {
         #[label("There needs to be a path here")]
-        at_span: SourceSpan,
+        _at_span: SourceSpan,
     },
 }
 
@@ -42,15 +42,15 @@ impl LexError {
         orientation: Orientation,
     ) -> Self {
         LexError::MissingOpeningBrace {
-            ch_expected: Token::OperatorBegin(orientation).into(),
-            ch_found: found,
-            expected_full: format!(
+            _ch_expected: Token::OperatorBegin(orientation).into(),
+            _ch_found: found,
+            _expected_full: format!(
                 "{}?{}",
                 char::from(Token::OperatorBegin(orientation)),
                 char::from(Token::OperatorEnd(orientation))
             ),
-            at_span,
-            op_span,
+            _at_span: at_span,
+            _op_span: op_span,
         }
     }
 
@@ -61,28 +61,28 @@ impl LexError {
         orientation: Orientation,
     ) -> Self {
         LexError::MissingClosingBrace {
-            ch_expected: Token::OperatorEnd(orientation).into(),
-            ch_found: found,
-            expected_full: format!(
+            _ch_expected: Token::OperatorEnd(orientation).into(),
+            _ch_found: found,
+            _expected_full: format!(
                 "{}?{}",
                 char::from(Token::OperatorBegin(orientation)),
                 char::from(Token::OperatorEnd(orientation))
             ),
-            at_span,
-            op_span,
+            _at_span: at_span,
+            _op_span: op_span,
         }
     }
 
     pub fn missing_conditional_path(at_span: SourceSpan) -> Self {
-        LexError::MissingConditionalPath { at_span }
+        LexError::MissingConditionalPath { _at_span: at_span }
     }
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("{} problem(s) found", errors.len())]
+#[error("{} problem(s) found", _errors.len())]
 pub struct LexErrors {
     #[source_code]
-    pub src: miette::NamedSource<String>,
+    pub _src: miette::NamedSource<String>,
     #[related]
-    pub errors: Vec<LexError>,
+    pub _errors: Vec<LexError>,
 }

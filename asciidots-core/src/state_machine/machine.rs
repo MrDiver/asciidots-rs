@@ -1,5 +1,5 @@
 use crate::{
-    parser::{SpanToken, Token},
+    parser::SpanToken,
     primitives::{Direction, Position},
 };
 

@@ -1,6 +1,6 @@
 use asciidots_core::{
     interpreter::{DotsInterpreter, InterpreterResult},
-    parser::{LexError, LexErrors, Lexer},
+    parser::{LexErrors, Lexer},
 };
 use miette::NamedSource;
 
@@ -11,16 +11,16 @@ pub fn check(content: &str) -> Result<(), LexErrors> {
     match lexer.finish() {
         Ok(_) => Ok(()),
         Err(e) => Err(LexErrors {
-            src: NamedSource::new("Some Dots", content.to_string()),
-            errors: e,
+            _src: NamedSource::new("Some Dots", content.to_string()),
+            _errors: e,
         }),
     }
 }
 
 pub fn run(content: &str) -> miette::Result<()> {
     let mut interpreter = DotsInterpreter::from_string(content).map_err(|e| LexErrors {
-        src: NamedSource::new("Some Dots", content.to_string()),
-        errors: e,
+        _src: NamedSource::new("Some Dots", content.to_string()),
+        _errors: e,
     })?;
 
     'outer: while interpreter.num_dots() > 0 {

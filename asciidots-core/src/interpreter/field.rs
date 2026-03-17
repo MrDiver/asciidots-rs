@@ -23,7 +23,7 @@ impl AsciiField {
         lexer.run();
         let rows: Vec<Vec<SpanToken>> = lexer.finish()?;
         let height = rows.len();
-        let width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let width = rows.iter().map(Vec::len).max().unwrap_or(0);
         let mut field = Vec::with_capacity(width * height);
         for (y, row) in rows.into_iter().enumerate() {
             let row_len = row.len();
@@ -69,7 +69,7 @@ impl AsciiField {
         }
         let (x, y) = (x as usize, y as usize);
         if x >= self.width || y >= self.height {
-            return SpanToken::new(Token::Empty, x as usize, y as usize, ' ', 0);
+            return SpanToken::new(Token::Empty, x, y, ' ', 0);
         }
         self.field[y * self.width + x]
     }

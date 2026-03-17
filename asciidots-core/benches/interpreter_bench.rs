@@ -81,9 +81,8 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
 }
 
 fn make_initialized_program(source: &str) -> DotsInterpreter {
-    let program = DotsInterpreter::from_string(source)
-        .expect("program parsing should succeed for benchmark input");
-    program
+    DotsInterpreter::from_string(source)
+        .expect("program parsing should succeed for benchmark input")
 }
 
 /// Step N times without checking for termination.

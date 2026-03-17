@@ -1,4 +1,4 @@
-use crate::{parser::Token, primitives::Position};
+use crate::parser::Token;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -6,32 +6,32 @@ use thiserror::Error;
 #[error("The Program died Unexpectedly")]
 pub enum RuntimeDiagnostic {
     None,
-    #[error("The printing modifier encountered is invalid {}", char::from(*invalid))]
+    #[error("The printing modifier encountered is invalid {}", char::from(*_invalid))]
     #[diagnostic(help("Try: one of @, #, \"...\" or '...' "), severity(Warning))]
     InvalidPrintingModifier {
-        invalid: Token,
+        _invalid: Token,
         #[label("this here")]
-        span: SourceSpan,
+        _span: SourceSpan,
     },
     #[error(
         "The assertion failed around this position expected: {} found: {}",
-        expected,
-        found
+        _expected,
+        _found
     )]
     #[diagnostic(severity(Warning))]
     AssertionFailed {
-        expected: f64,
-        found: f64,
+        _expected: f64,
+        _found: f64,
         #[label("here")]
         span: SourceSpan,
     },
     #[error(
         "The assertion could not be parsed because {} is not a valid float",
-        accumulator
+        _accumulator
     )]
     #[diagnostic(severity(Warning))]
     FailedToParseAssert {
-        accumulator: String,
+        _accumulator: String,
         #[label("This is not a valid float")]
         span: SourceSpan,
     },
@@ -39,18 +39,24 @@ pub enum RuntimeDiagnostic {
 
 impl RuntimeDiagnostic {
     pub fn invalid_printing_modifier(invalid: Token, span: SourceSpan) -> Self {
-        RuntimeDiagnostic::InvalidPrintingModifier { invalid, span }
+        RuntimeDiagnostic::InvalidPrintingModifier {
+            _invalid: invalid,
+            _span: span,
+        }
     }
 
     pub fn assertion_failed(expected: f64, found: f64, span: SourceSpan) -> Self {
         RuntimeDiagnostic::AssertionFailed {
-            expected,
-            found,
+            _expected: expected,
+            _found: found,
             span,
         }
     }
 
     pub(crate) fn failed_to_parse_assert(accumulator: String, span: SourceSpan) -> Self {
-        RuntimeDiagnostic::FailedToParseAssert { accumulator, span }
+        RuntimeDiagnostic::FailedToParseAssert {
+            _accumulator: accumulator,
+            span,
+        }
     }
 }

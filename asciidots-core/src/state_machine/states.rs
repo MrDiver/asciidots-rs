@@ -133,7 +133,7 @@ impl MachineStateExecutor for TravelState {
                 dot.step();
             }
             Token::ForceDirection(dir) => {
-                if dot.direction.orthogonal(&dir) {
+                if dot.direction.orthogonal(dir) {
                     dot.set_dir(*dir);
                 }
                 dot.step();
@@ -354,14 +354,14 @@ impl MachineStateExecutor for AssertingState {
         if self.inside_quote {
             if matches!(token.inner(), Token::Quote | Token::QuoteStream) {
                 self.inside_quote = false;
-                let expected: f64 = self.accumulator.parse().or_else(|_| {
-                    Err(RuntimeDiagnostic::failed_to_parse_assert(
+                let expected: f64 = self.accumulator.parse().map_err(|_| {
+                    RuntimeDiagnostic::failed_to_parse_assert(
                         std::mem::take(&mut self.accumulator),
                         {
                             let len = self.accumulator.len();
                             (token.offset() - len, len).into()
                         },
-                    ))
+                    )
                 })?;
                 if dot.value == expected {
                     Ok(MachineEvent::Nothing)

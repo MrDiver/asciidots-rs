@@ -1,5 +1,5 @@
 use crate::{primitives::Orientation, state_machine::DotMachine};
-use std::{collections::VecDeque, ops::Rem, u64};
+use std::{collections::VecDeque, ops::Rem};
 
 /// A small queue for dots waiting at one side of an operator.
 ///
@@ -121,9 +121,9 @@ impl OperatorQueues {
                         0.0
                     }
                 }
-                '&' => (a as u64 & b as u64)as f64,
-                '|' => (a as u64 | b as u64)as f64,
-                'x' => (a as u64 ^ b as u64)as f64,
+                '&' => (a as u64 & b as u64) as f64,
+                '|' => (a as u64 | b as u64) as f64,
+                'x' => (a as u64 ^ b as u64) as f64,
                 _ => a,
             };
             let mut new_dot = primary.dot();

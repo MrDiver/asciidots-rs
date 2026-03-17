@@ -170,7 +170,7 @@ impl<'a> Widget for GridWidget<'a> {
                         let style = style_for_grid_cell(grid_cell);
                         cell.set_char(c);
                         cell.set_style(style);
-                    }else{
+                    } else {
                         cell.set_char(' ');
                         cell.set_bg(RGB::BLACK.into());
                     }
@@ -211,7 +211,11 @@ impl RatatuiView {
 
     fn process_results(&mut self, results: &[InterpreterResult]) {
         for result in results {
-            apply_result_to_output(&mut self.output_entries, &mut self.current_output_line, result);
+            apply_result_to_output(
+                &mut self.output_entries,
+                &mut self.current_output_line,
+                result,
+            );
         }
     }
 
@@ -345,6 +349,12 @@ impl RatatuiView {
             }
             _ => None,
         }
+    }
+}
+
+impl Default for RatatuiView {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -491,7 +501,8 @@ impl DotsView for RatatuiView {
                     .direction(Direction::Horizontal)
                     .constraints([Constraint::Min(1), Constraint::Length(1)])
                     .split(output_inner);
-                let output_model = OutputListModel::from_output(&self.output_entries, &self.current_output_line);
+                let output_model =
+                    OutputListModel::from_output(&self.output_entries, &self.current_output_line);
                 let visible_count = output_cols[0].height as usize;
                 let total_items = output_model.item_count();
                 let max_scroll = total_items.saturating_sub(visible_count);
@@ -528,12 +539,12 @@ impl DotsView for RatatuiView {
     }
 
     fn poll_command(&mut self) -> Option<AppCommand> {
-        if event::poll(Duration::from_millis(1)).unwrap(){
+        if event::poll(Duration::from_millis(1)).unwrap() {
             match event::read().unwrap() {
                 Event::Key(event) => self.handle_key_event(&event),
                 _ => None,
             }
-        }else{
+        } else {
             None
         }
     }
@@ -559,4 +570,3 @@ pub fn run(content: &str) {
         view.render(&app)
     }
 }
-

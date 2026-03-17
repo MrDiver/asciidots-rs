@@ -1,8 +1,10 @@
 use asciidots_core::interpreter::DotsInterpreter;
 
+#[allow(unused)]
 pub type DotPos = (i32, i32);
 pub type DotValueAtPos = (i32, i32, f64);
 
+#[allow(unused)]
 fn sorted_positions(interpreter: &DotsInterpreter) -> Vec<DotPos> {
     let mut positions: Vec<DotPos> = interpreter
         .get_dots()
@@ -37,6 +39,7 @@ fn step_n(interpreter: &mut DotsInterpreter, n: usize) {
     }
 }
 
+#[allow(unused)]
 pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
     let mut interpreter =
         DotsInterpreter::from_string(program).expect("program should lex and initialize");

@@ -1,4 +1,3 @@
-use miette::SourceSpan;
 use rustc_hash::FxHashMap;
 
 use crate::{
