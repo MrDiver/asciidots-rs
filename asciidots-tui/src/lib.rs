@@ -7,6 +7,7 @@ use asciidots_core::presentation::{
     apply_result_to_output,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::widgets::Paragraph;
 use ratatui::{
     DefaultTerminal,
     layout::{Constraint, Direction, Layout},
@@ -186,6 +187,11 @@ impl<'a> Widget for GridWidget<'a> {
 // ║                                      ║
 // ╚══════════════════════════════════════╝
 
+pub enum ViewMode {
+    Normal,
+    ProcessInput(u64),
+}
+
 pub struct RatatuiView {
     term: DefaultTerminal,
     grid_scroll: (usize, usize),
@@ -194,6 +200,8 @@ pub struct RatatuiView {
     output_entries: Vec<OutputEntry>,
     current_output_line: String,
     running: bool,
+    mode: ViewMode,
+    input_string: String,
 }
 
 impl RatatuiView {
@@ -206,11 +214,20 @@ impl RatatuiView {
             output_entries: Vec::new(),
             current_output_line: String::new(),
             running: false,
+            mode: ViewMode::Normal,
+            input_string: String::new(),
         }
     }
 
     fn process_results(&mut self, results: &[InterpreterResult]) {
         for result in results {
+            match result {
+                InterpreterResult::InputRequest(uuid) => {
+                    self.input_string.clear();
+                    self.mode = ViewMode::ProcessInput(*uuid);
+                }
+                _ => {}
+            }
             apply_result_to_output(
                 &mut self.output_entries,
                 &mut self.current_output_line,
@@ -227,127 +244,163 @@ impl RatatuiView {
     }
 
     fn handle_key_event(&mut self, event: &KeyEvent) -> Option<AppCommand> {
-        match event {
-            KeyEvent {
-                code: KeyCode::Esc,
-                kind: KeyEventKind::Press,
-                ..
-            } => Some(AppCommand::StopProgram),
-            KeyEvent {
-                code: KeyCode::Char('w'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.grid_scroll = (self.grid_scroll.0, self.grid_scroll.1.saturating_sub(1));
-                None
-            }
-            KeyEvent {
-                code: KeyCode::Char('s'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.grid_scroll = (self.grid_scroll.0, self.grid_scroll.1.saturating_add(1));
-                None
-            }
-            KeyEvent {
-                code: KeyCode::Char('a'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.grid_scroll = (self.grid_scroll.0.saturating_sub(1), self.grid_scroll.1);
-                None
-            }
-            KeyEvent {
-                code: KeyCode::Char('d'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.grid_scroll = (self.grid_scroll.0.saturating_add(1), self.grid_scroll.1);
-                None
-            }
-            KeyEvent {
-                code: KeyCode::Char(' '),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.running = !self.running;
-                if self.running {
-                    Some(AppCommand::Start)
-                } else {
-                    Some(AppCommand::Pause)
+        match self.mode {
+            ViewMode::Normal => match event {
+                KeyEvent {
+                    code: KeyCode::Esc,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::StopProgram),
+                KeyEvent {
+                    code: KeyCode::Char('w'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.grid_scroll = (self.grid_scroll.0, self.grid_scroll.1.saturating_sub(1));
+                    None
                 }
-            }
-            KeyEvent {
-                code: KeyCode::Char('r'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.running = false;
-                Some(AppCommand::Reset)
-            }
-            KeyEvent {
-                code: KeyCode::Char('n'),
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.running = false;
-                Some(AppCommand::Step)
-            }
-            KeyEvent {
-                code: KeyCode::Char('j'),
-                kind: KeyEventKind::Press,
-                ..
-            } => Some(AppCommand::AdjustSpeed(10)),
-            KeyEvent {
-                code: KeyCode::Char('k'),
-                kind: KeyEventKind::Press,
-                ..
-            } => Some(AppCommand::AdjustSpeed(-10)),
-            KeyEvent {
-                code: KeyCode::Char('u'),
-                kind: KeyEventKind::Press,
-                ..
-            } => Some(AppCommand::AdjustStepsPerFrame(-1)),
-            KeyEvent {
-                code: KeyCode::Char('i'),
-                kind: KeyEventKind::Press,
-                ..
-            } => Some(AppCommand::AdjustStepsPerFrame(1)),
-            KeyEvent {
-                code: KeyCode::Up,
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.output_follow = false;
-                self.output_scroll = self.output_scroll.saturating_sub(1);
-                None
-            }
-            KeyEvent {
-                code: KeyCode::Down,
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.output_scroll = self.output_scroll.saturating_add(1);
-                None
-            }
-            KeyEvent {
-                code: KeyCode::PageUp,
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.output_follow = false;
-                self.output_scroll = self.output_scroll.saturating_sub(10);
-                None
-            }
-            KeyEvent {
-                code: KeyCode::PageDown,
-                kind: KeyEventKind::Press,
-                ..
-            } => {
-                self.output_scroll = self.output_scroll.saturating_add(10);
-                None
-            }
-            _ => None,
+                KeyEvent {
+                    code: KeyCode::Char('s'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.grid_scroll = (self.grid_scroll.0, self.grid_scroll.1.saturating_add(1));
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char('a'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.grid_scroll = (self.grid_scroll.0.saturating_sub(1), self.grid_scroll.1);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char('d'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.grid_scroll = (self.grid_scroll.0.saturating_add(1), self.grid_scroll.1);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char(' '),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.running = !self.running;
+                    if self.running {
+                        Some(AppCommand::Start)
+                    } else {
+                        Some(AppCommand::Pause)
+                    }
+                }
+                KeyEvent {
+                    code: KeyCode::Char('r'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.running = false;
+                    Some(AppCommand::Reset)
+                }
+                KeyEvent {
+                    code: KeyCode::Char('n'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.running = false;
+                    Some(AppCommand::Step)
+                }
+                KeyEvent {
+                    code: KeyCode::Char('j'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::AdjustSpeed(10)),
+                KeyEvent {
+                    code: KeyCode::Char('k'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::AdjustSpeed(-10)),
+                KeyEvent {
+                    code: KeyCode::Char('u'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::AdjustStepsPerFrame(-1)),
+                KeyEvent {
+                    code: KeyCode::Char('i'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::AdjustStepsPerFrame(1)),
+                KeyEvent {
+                    code: KeyCode::Up,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.output_follow = false;
+                    self.output_scroll = self.output_scroll.saturating_sub(1);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Down,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.output_scroll = self.output_scroll.saturating_add(1);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::PageUp,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.output_follow = false;
+                    self.output_scroll = self.output_scroll.saturating_sub(10);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::PageDown,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.output_scroll = self.output_scroll.saturating_add(10);
+                    None
+                }
+                _ => None,
+            },
+            ViewMode::ProcessInput(uuid) => match event {
+                KeyEvent {
+                    code: KeyCode::Esc,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => Some(AppCommand::StopProgram),
+                KeyEvent {
+                    code: KeyCode::Enter,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.mode = ViewMode::Normal;
+                    Some(AppCommand::InputAnswer(
+                        uuid,
+                        self.input_string
+                            .trim()
+                            .parse()
+                            .expect("Something went wrong while parsing input"),
+                    ))
+                }
+                KeyEvent {
+                    code: KeyCode::Char(c),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    if c.is_ascii_digit() || *c == '.' && !self.input_string.contains(*c) {
+                        self.input_string.push(*c);
+                        None
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -534,6 +587,20 @@ impl DotsView for RatatuiView {
                     output_cols[1],
                     &mut scrollbar_state,
                 );
+
+                match self.mode {
+                    ViewMode::ProcessInput(uuid) => {
+                        let input_area = area.centered(Constraint::Max(40), Constraint::Length(4));
+                        let input_text = Paragraph::new(self.input_string.as_str()).block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title(format!("Input for Dot({uuid})")),
+                        );
+                        frame.render_widget(Clear, input_area);
+                        frame.render_widget(input_text, input_area);
+                    }
+                    _ => {}
+                }
             })
             .unwrap();
     }
@@ -565,8 +632,10 @@ pub fn run(content: &str) {
             let results = app.handle_command(c);
             view.process_results(&results);
         }
-        let results = app.tick();
-        view.process_results(&results);
+        if matches!(view.mode, ViewMode::Normal) {
+            let results = app.tick();
+            view.process_results(&results);
+        }
         view.render(&app)
     }
 }

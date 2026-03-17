@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    interpreter::{DotsInterpreter, InterpreterResult},
+    interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     parser::LexError,
 };
 
@@ -15,6 +15,7 @@ pub enum AppCommand {
     Reset,
     AdjustSpeed(i64),
     AdjustStepsPerFrame(i32),
+    InputAnswer(u64, f64),
     StopProgram,
 }
 
@@ -89,8 +90,10 @@ impl RuntimeController {
 
     fn adjust_steps_per_frame(&mut self, delta: i32) {
         let current = self.steps_per_frame as i32;
-        let next = (current + delta)
-            .clamp(Self::MIN_STEPS_PER_FRAME as i32, Self::MAX_STEPS_PER_FRAME as i32);
+        let next = (current + delta).clamp(
+            Self::MIN_STEPS_PER_FRAME as i32,
+            Self::MAX_STEPS_PER_FRAME as i32,
+        );
         self.steps_per_frame = next as usize;
     }
 
@@ -104,32 +107,32 @@ impl RuntimeController {
 
     pub fn handle_command(&mut self, command: AppCommand) -> Vec<InterpreterResult> {
         match command {
-            AppCommand::Step => self.run_steps(1),
+            AppCommand::Step => return self.run_steps(1),
             AppCommand::Reverse => {
                 todo!()
             }
             AppCommand::Pause => {
                 self.running = false;
-                Vec::new()
             }
             AppCommand::Start => {
                 self.running = true;
-                Vec::new()
             }
             AppCommand::Reset => {
                 self.reset();
-                Vec::new()
             }
             AppCommand::AdjustSpeed(delta_ms) => {
                 self.adjust_tick_speed_ms(delta_ms);
-                Vec::new()
             }
             AppCommand::AdjustStepsPerFrame(delta) => {
                 self.adjust_steps_per_frame(delta);
-                Vec::new()
             }
-            AppCommand::StopProgram => Vec::new(),
+            AppCommand::StopProgram => {}
+            AppCommand::InputAnswer(uuid, value) => {
+                self.interpreter
+                    .handle_command(InterpreterCommand::InputAnswer(uuid, value));
+            }
         }
+        Vec::new()
     }
 
     pub fn grid_model(&self) -> AsciiMapModel<'_> {

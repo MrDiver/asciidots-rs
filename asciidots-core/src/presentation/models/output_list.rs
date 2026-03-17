@@ -31,19 +31,14 @@ pub fn apply_result_to_output(
     result: &InterpreterResult,
 ) {
     match result {
-        InterpreterResult::Print(text) => {
-            current_line.push_str(text);
+        InterpreterResult::PrintChar(c) => {
+            current_line.push(*c);
         }
         InterpreterResult::PrintLn(text) => {
             current_line.push_str(text);
             entries.push(OutputEntry::line(std::mem::take(current_line)));
         }
-        InterpreterResult::InputRequest(id) => {
-            if !current_line.is_empty() {
-                entries.push(OutputEntry::line(std::mem::take(current_line)));
-            }
-            entries.push(OutputEntry::system(format!("[input request: {id}]")));
-        }
+        InterpreterResult::InputRequest(_) => {}
         InterpreterResult::EndProgram => {
             if !current_line.is_empty() {
                 entries.push(OutputEntry::line(std::mem::take(current_line)));

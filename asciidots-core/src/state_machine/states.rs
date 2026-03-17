@@ -1,3 +1,5 @@
+use log::trace;
+
 use super::dot::Dot;
 use super::error::RuntimeDiagnostic;
 use super::event::MachineEvent;
@@ -9,7 +11,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub enum SetKind {
-    Id,
+    Addr,
     Value,
 }
 
@@ -18,6 +20,8 @@ pub struct TravelState;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SetState {
+    waiting_input: bool,
+    input: Option<f64>,
     kind: SetKind,
     pub(super) acc: u64,
 }
@@ -30,9 +34,10 @@ pub struct WaitingState;
 
 #[derive(Debug, Clone)]
 pub struct PrintingState {
-    pub(super) inside_quote: bool,
-    pub(super) streaming: bool,
-    pub(super) accumulator: String,
+    inside_quote: bool,
+    streaming: bool,
+    accumulator: String,
+    got_modifier: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -40,9 +45,6 @@ pub struct AssertingState {
     inside_quote: bool,
     accumulator: String,
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct InputWaitingState;
 
 #[derive(Debug, Clone)]
 pub enum MachineState {
@@ -52,7 +54,6 @@ pub enum MachineState {
     Waiting(WaitingState),
     Printing(PrintingState),
     Asserting(AssertingState),
-    InputWaiting(InputWaitingState),
 }
 
 impl MachineState {
@@ -68,12 +69,16 @@ impl MachineState {
             MachineState::Waiting(_) => "wait",
             MachineState::Printing(_) => "print",
             MachineState::Asserting(_) => "assert",
-            MachineState::InputWaiting(_) => "input",
         }
     }
 
     pub(super) fn set(kind: SetKind) -> Self {
-        MachineState::Set(SetState { kind, acc: 0 })
+        MachineState::Set(SetState {
+            waiting_input: false,
+            input: None,
+            kind,
+            acc: 0,
+        })
     }
 
     pub(super) fn dead() -> Self {
@@ -89,6 +94,7 @@ impl MachineState {
             accumulator: String::default(),
             streaming: false,
             inside_quote: false,
+            got_modifier: false,
         })
     }
 
@@ -122,6 +128,7 @@ impl MachineStateExecutor for TravelState {
         token: &SpanToken,
         pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        trace!("[state{}] Process Travel", dot.uuid);
         match token.inner() {
             Token::Dot => {
                 dot.step();
@@ -190,15 +197,22 @@ impl MachineStateExecutor for TravelState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        trace!("[state{}] Next Travel", dot.uuid);
         match token.inner() {
             Token::Empty => StateTransition::Transition(MachineState::dead()),
             Token::ValueMarker => StateTransition::Transition(MachineState::set(SetKind::Value)),
-            Token::IdMarker => StateTransition::Transition(MachineState::set(SetKind::Id)),
+            Token::AddrMarker => StateTransition::Transition(MachineState::set(SetKind::Addr)),
             Token::Write => StateTransition::Transition(MachineState::printing()),
             Token::Assertion => StateTransition::Transition(MachineState::asserting()),
             _ => StateTransition::Stay,
         }
+    }
+}
+
+impl SetState {
+    pub fn receive_input(&mut self, value: f64) {
+        self.input = Some(value)
     }
 }
 
@@ -209,10 +223,21 @@ impl MachineStateExecutor for SetState {
         token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        trace!("[state{}] Process Set", dot.uuid);
+        if self.waiting_input {
+            return Ok(MachineEvent::Nothing);
+        }
         match token.inner() {
             Token::Digit(d) => {
                 self.acc = self.acc * 10 + *d as u64;
                 dot.step();
+            }
+            Token::Read => {
+                dot.step();
+                return {
+                    self.waiting_input = true;
+                    Ok(MachineEvent::Input(dot.uuid))
+                };
             }
             _ => {
                 dot.step();
@@ -222,12 +247,25 @@ impl MachineStateExecutor for SetState {
     }
 
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        trace!("[state{}] Next Set", dot.uuid);
+        if self.waiting_input && self.input.is_some() {
+            match self.kind {
+                SetKind::Value => dot.set_value(self.input.unwrap_or_else(|| unreachable!())),
+                SetKind::Addr => dot.set_addr(self.input.unwrap_or_else(|| unreachable!()) as u64),
+            };
+            dot.set_value(self.input.unwrap_or_else(|| unreachable!()));
+            dot.step();
+            return StateTransition::Transition(MachineState::travel());
+        } else if self.waiting_input {
+            return StateTransition::Stay;
+        }
         match token.inner() {
+            Token::Read => StateTransition::Stay,
             Token::Digit(_) => StateTransition::Stay,
             _ => {
                 match self.kind {
                     SetKind::Value => dot.set_value(self.acc as f64),
-                    SetKind::Id => dot.set_id(self.acc),
+                    SetKind::Addr => dot.set_addr(self.acc),
                 };
                 StateTransition::Transition(MachineState::travel())
             }
@@ -242,6 +280,7 @@ impl MachineStateExecutor for WaitingState {
         token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        trace!("[state{}] Process Waiting", dot.uuid);
         match token.inner() {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) | Token::Operator { .. } => {
                 dot.step();
@@ -253,7 +292,8 @@ impl MachineStateExecutor for WaitingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        trace!("[state{}] Next Waiting", dot.uuid);
         match token.inner() {
             Token::OperatorBegin(_) | Token::OperatorEnd(_) => StateTransition::Stay,
             _ => StateTransition::Transition(MachineState::travel()),
@@ -268,6 +308,7 @@ impl MachineStateExecutor for PrintingState {
         token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        trace!("[state{}] Process Printing", dot.uuid);
         if self.inside_quote {
             dot.step();
             if *token.inner() == Token::Quote {
@@ -292,9 +333,9 @@ impl MachineStateExecutor for PrintingState {
                 dot.step();
                 return Ok(MachineEvent::PrintLn(dot.value.to_string()));
             }
-            Token::IdMarker => {
+            Token::AddrMarker => {
                 dot.step();
-                return Ok(MachineEvent::PrintLn(dot.id.to_string()));
+                return Ok(MachineEvent::PrintLn(dot.addr.to_string()));
             }
             Token::QuoteStream => {
                 dot.step();
@@ -314,32 +355,21 @@ impl MachineStateExecutor for PrintingState {
         Ok(MachineEvent::Nothing)
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        trace!("[state{}] Next Printing", dot.uuid);
         if self.inside_quote || self.streaming {
             StateTransition::Stay
         } else {
             match token.inner() {
-                Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::IdMarker => {
+                Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::AddrMarker
+                    if !self.got_modifier =>
+                {
+                    self.got_modifier = true;
                     StateTransition::Stay
                 }
                 _ => StateTransition::Transition(MachineState::travel()),
             }
         }
-    }
-}
-
-impl MachineStateExecutor for InputWaitingState {
-    fn process(
-        &mut self,
-        _dot: &mut Dot,
-        _token: &SpanToken,
-        _pending_dots: &mut Vec<DotMachine>,
-    ) -> Result<MachineEvent, RuntimeDiagnostic> {
-        todo!()
-    }
-
-    fn next(&mut self, _dot: &mut Dot, _token: &SpanToken) -> StateTransition {
-        todo!()
     }
 }
 
@@ -350,6 +380,7 @@ impl MachineStateExecutor for AssertingState {
         token: &SpanToken,
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
+        trace!("[state{}] Process Asserting", dot.uuid);
         dot.step();
         if self.inside_quote {
             if matches!(token.inner(), Token::Quote | Token::QuoteStream) {
@@ -386,7 +417,8 @@ impl MachineStateExecutor for AssertingState {
         }
     }
 
-    fn next(&mut self, _dot: &mut Dot, token: &SpanToken) -> StateTransition {
+    fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
+        trace!("[state{}] Next Asserting", dot.uuid);
         if self.inside_quote {
             StateTransition::Stay
         } else {

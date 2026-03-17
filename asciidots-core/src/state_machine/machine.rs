@@ -49,8 +49,12 @@ impl DotMachine {
         self.dot.value
     }
 
-    pub fn id(&self) -> u64 {
-        self.dot.id
+    pub fn addr(&self) -> u64 {
+        self.dot.addr
+    }
+
+    pub fn uuid(&self) -> u64 {
+        self.dot.uuid
     }
 
     pub fn state_label(&self) -> &'static str {
@@ -61,11 +65,15 @@ impl DotMachine {
         self.dot
     }
 
+    pub fn state_mut(&mut self) -> &mut MachineState {
+        &mut self.state
+    }
+
     pub fn replace_dot(&mut self, dot: Dot) {
         self.dot = dot;
     }
 
-    pub fn run(
+    pub fn process(
         &mut self,
         token: &SpanToken,
         pending_dots: &mut Vec<DotMachine>,
@@ -75,7 +83,6 @@ impl DotMachine {
             MachineState::Set(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Waiting(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Printing(s) => s.process(&mut self.dot, token, pending_dots),
-            MachineState::InputWaiting(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Asserting(s) => s.process(&mut self.dot, token, pending_dots),
             MachineState::Dead(_) => Ok(MachineEvent::Nothing),
         }
@@ -92,13 +99,11 @@ impl DotMachine {
             MachineEvent::Nothing
             | MachineEvent::PrintLn(_)
             | MachineEvent::PrintChar(_)
-            | MachineEvent::Print(_)
             | MachineEvent::Input(_) => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Set(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Waiting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Printing(s) => s.next(&mut self.dot, lookahead),
-                MachineState::InputWaiting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Asserting(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Dead(_) => StateTransition::Transition(MachineState::dead()),
             },

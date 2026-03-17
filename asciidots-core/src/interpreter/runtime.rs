@@ -1,24 +1,25 @@
+use log::trace;
 use rustc_hash::FxHashMap;
 
 use crate::{
     parser::{LexError, SpanToken, Token},
     primitives::{Direction, Position},
-    state_machine::{DotMachine, MachineEvent, RuntimeDiagnostic},
+    state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
 };
 
 use super::{field::AsciiField, operators::OperatorQueues};
 
 #[derive(Debug, Clone)]
 pub enum InterpreterResult {
-    Print(String),
+    PrintChar(char),
     PrintLn(String),
-    InputRequest(usize),
+    InputRequest(u64),
     EndProgram,
 }
 
 #[derive(Debug, Clone)]
 pub enum InterpreterCommand {
-    InputAnswer(usize, f64),
+    InputAnswer(u64, f64),
 }
 
 pub struct DotsInterpreter {
@@ -49,24 +50,6 @@ impl DotsInterpreter {
         &self.field
     }
 
-    fn push_print(results: &mut Vec<InterpreterResult>, value: String) {
-        if let Some(InterpreterResult::Print(existing)) = results.last_mut() {
-            existing.push_str(&value);
-        } else {
-            results.push(InterpreterResult::Print(value));
-        }
-    }
-
-    fn push_print_char(results: &mut Vec<InterpreterResult>, value: char) {
-        if let Some(InterpreterResult::Print(existing)) = results.last_mut() {
-            existing.push(value);
-        } else {
-            let mut output = String::with_capacity(1);
-            output.push(value);
-            results.push(InterpreterResult::Print(output));
-        }
-    }
-
     fn initalize(&mut self) {
         for token in self.field.get_field() {
             let position = Position::new(token.col() as i32, token.line() as i32);
@@ -79,15 +62,24 @@ impl DotsInterpreter {
                         Direction::Right,
                     ] {
                         let offsetpos = position + (*direction).into();
-                        if let Token::Pipe(orientation) = self.field.at(&offsetpos)
-                            && orientation == direction.orientation()
-                        {
-                            self.dots.push(DotMachine::new(
-                                *direction,
-                                token.col() as i32,
-                                token.line() as i32,
-                            ));
-                            break;
+                        match self.field.at(&offsetpos) {
+                            Token::Pipe(orientation) if orientation == direction.orientation() => {
+                                self.dots.push(DotMachine::new(
+                                    *direction,
+                                    token.col() as i32,
+                                    token.line() as i32,
+                                ));
+                                break;
+                            }
+                            Token::CrossPipe | Token::Mirror(_) => {
+                                self.dots.push(DotMachine::new(
+                                    *direction,
+                                    token.col() as i32,
+                                    token.line() as i32,
+                                ));
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -108,7 +100,7 @@ impl DotsInterpreter {
         while i < self.dots.len() {
             let dot = &mut self.dots[i];
             let token = self.field.at_spanned(dot.position());
-            let event = match dot.run(&token, &mut self.pending_dots) {
+            let event = match dot.process(&token, &mut self.pending_dots) {
                 Ok(e) => e,
                 Err(d) => {
                     self.diagnostics.push(d);
@@ -136,18 +128,18 @@ impl DotsInterpreter {
                     }
                     repeat_iteration = true;
                 }
+                MachineEvent::Input(uuid) => {
+                    self.results.push(InterpreterResult::InputRequest(uuid));
+                    let lookahead = self.field.at_spanned(dot.position());
+                    dot.next(&MachineEvent::Nothing, &lookahead)
+                }
                 MachineEvent::PrintLn(s) => {
                     self.results.push(InterpreterResult::PrintLn(s));
                     let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
                 MachineEvent::PrintChar(c) => {
-                    Self::push_print_char(&mut self.results, c);
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, &lookahead)
-                }
-                MachineEvent::Print(s) => {
-                    Self::push_print(&mut self.results, s);
+                    self.results.push(InterpreterResult::PrintChar(c));
                     let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, &lookahead)
                 }
@@ -182,7 +174,21 @@ impl DotsInterpreter {
         }
     }
 
+    pub fn handle_command(&mut self, command: InterpreterCommand) {
+        trace!("--- Handle Commands ---");
+        match command {
+            InterpreterCommand::InputAnswer(uuid, value) => {
+                if let Some(machine) = self.dots.iter_mut().find(|dot| dot.uuid() == uuid) {
+                    if let MachineState::Set(s) = machine.state_mut() {
+                        s.receive_input(value);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn step(&mut self) -> Result<&[InterpreterResult], &[RuntimeDiagnostic]> {
+        trace!("--- Step ---");
         self.results.clear();
         self.interpret();
         Self::cleanup_dead_dots(&mut self.dots);
@@ -191,6 +197,7 @@ impl DotsInterpreter {
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
         } else {
+            trace!("diagnostics: {:?}", &self.results);
             Ok(&self.results)
         }
     }

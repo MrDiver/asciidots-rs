@@ -20,7 +20,7 @@ pub enum Token {
     OperatorEnd(Orientation),   // Horizontal } and Vertical ]
     Reflector(MirrorKind),      // Forward `(` and Backward `)`
     ValueMarker,                // #
-    IdMarker,                   // @
+    AddrMarker,                 // @
     Read,                       // ?
     Write,                      // $
     Conditonal(bool),           // ~
@@ -55,7 +55,7 @@ impl std::fmt::Display for Token {
             Token::Reflector(MirrorKind::Forward) => write!(f, "("),
             Token::Reflector(MirrorKind::Backward) => write!(f, ")"),
             Token::ValueMarker => write!(f, "#"),
-            Token::IdMarker => write!(f, "@"),
+            Token::AddrMarker => write!(f, "@"),
             Token::Read => write!(f, "?"),
             Token::Write => write!(f, "$"),
             Token::Conditonal(_) => write!(f, "~"),
@@ -100,7 +100,7 @@ impl From<Token> for char {
             Token::Reflector(MirrorKind::Forward) => '(',
             Token::Reflector(MirrorKind::Backward) => ')',
             Token::ValueMarker => '#',
-            Token::IdMarker => '@',
+            Token::AddrMarker => '@',
             Token::Read => '?',
             Token::Write => '$',
             Token::Conditonal(_) => '~',

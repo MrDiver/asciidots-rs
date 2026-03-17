@@ -7,6 +7,5 @@ pub enum MachineEvent {
     AssertionFailed { expected: f64, found: f64 },
     PrintLn(String),
     PrintChar(char),
-    Print(String),
-    Input(usize),
+    Input(u64),
 }

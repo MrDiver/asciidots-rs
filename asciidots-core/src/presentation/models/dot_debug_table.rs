@@ -14,7 +14,7 @@ impl DotDebugTableModel {
             .iter()
             .map(|dot| {
                 [
-                    TableCell::new(format!("{}", dot.id()), TableCellKind::Changing),
+                    TableCell::new(format!("{}", dot.addr()), TableCellKind::Changing),
                     TableCell::new(format!("{:.2}", dot.value()), TableCellKind::Default),
                     TableCell::new(format!("{}", dot.position().x), TableCellKind::Quote),
                     TableCell::new(format!("{}", dot.position().y), TableCellKind::Quote),
@@ -52,6 +52,9 @@ impl TableModel for DotDebugTableModel {
     }
 
     fn get_cell(&self, row: usize, column: usize) -> Option<TableCell> {
-        self.rows.get(row).and_then(|line| line.get(column)).cloned()
+        self.rows
+            .get(row)
+            .and_then(|line| line.get(column))
+            .cloned()
     }
 }

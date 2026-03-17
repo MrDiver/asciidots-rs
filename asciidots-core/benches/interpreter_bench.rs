@@ -71,7 +71,7 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
             let spanned = SpanToken::temporary(token);
             let mut pending_dots = Vec::with_capacity(2);
 
-            dot.run(black_box(&spanned), &mut pending_dots)
+            dot.process(black_box(&spanned), &mut pending_dots)
                 .expect("single-step interpreter benchmark should not fail");
 
             black_box(dot);

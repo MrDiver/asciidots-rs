@@ -35,7 +35,9 @@ impl Lexer {
             .map(|(y, row)| {
                 row.iter()
                     .enumerate()
-                    .map(|(x, character)| SpanToken::new(Token::Empty, x, y, *character, offsets[y][x]))
+                    .map(|(x, character)| {
+                        SpanToken::new(Token::Empty, x, y, *character, offsets[y][x])
+                    })
                     .collect()
             })
             .collect();
@@ -156,7 +158,7 @@ impl Lexer {
             '(' => Ok(Token::Reflector(MirrorKind::Forward)),
             ')' => Ok(Token::Reflector(MirrorKind::Backward)),
             '#' => Ok(Token::ValueMarker),
-            '@' => Ok(Token::IdMarker),
+            '@' => Ok(Token::AddrMarker),
             '?' => Ok(Token::Read),
             '$' => Ok(Token::Write),
             '~' => match self.grid.get(y + 1).and_then(|row| row.get(x)) {

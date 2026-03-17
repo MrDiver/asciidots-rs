@@ -1,8 +1,10 @@
+use std::io::{self, Write};
+
 use asciidots_core::{
-    interpreter::{DotsInterpreter, InterpreterResult},
+    interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     parser::{LexErrors, Lexer},
 };
-use miette::NamedSource;
+use miette::{IntoDiagnostic, NamedSource};
 
 pub fn check(content: &str) -> Result<(), LexErrors> {
     let mut lexer: Lexer = content.into();
@@ -25,13 +27,27 @@ pub fn run(content: &str) -> miette::Result<()> {
 
     'outer: while interpreter.num_dots() > 0 {
         let commands = interpreter.step().unwrap();
+        let mut interpreter_commands = Vec::new();
         for command in commands {
             match command {
-                InterpreterResult::Print(s) => print!("{}", s),
+                InterpreterResult::PrintChar(s) => print!("{}", s),
                 InterpreterResult::PrintLn(s) => println!("{}", s),
-                InterpreterResult::InputRequest(_) => todo!(),
+                InterpreterResult::InputRequest(uuid) => {
+                    let mut stdout = io::stdout();
+                    print!("Input Dot({}): ", uuid);
+                    stdout.flush().into_diagnostic()?;
+
+                    let mut buffer = String::new();
+                    let stdin = io::stdin();
+                    stdin.read_line(&mut buffer).into_diagnostic()?;
+                    let value: f64 = buffer.trim().parse().into_diagnostic()?;
+                    interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
+                }
                 InterpreterResult::EndProgram => break 'outer,
             }
+        }
+        for command in interpreter_commands {
+            interpreter.handle_command(command);
         }
     }
     println!("Finished");

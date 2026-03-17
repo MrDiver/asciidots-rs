@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::primitives::{Direction, Orientation, Position};
 
 #[derive(Debug, Clone, Copy)]
@@ -5,16 +7,30 @@ pub struct Dot {
     pub direction: Direction,
     pub position: Position,
     pub value: f64,
-    pub id: u64,
+    pub addr: u64,
+    pub uuid: u64,
+}
+
+thread_local! {
+    static DOT_COUNTER: RefCell<u64> = RefCell::new(0);
+}
+
+fn next_dot_id() -> u64 {
+    DOT_COUNTER.with(|x| {
+        let mut x = x.borrow_mut();
+        *x += 1;
+        *x
+    })
 }
 
 impl Dot {
     pub fn new(direction: Direction, position: Position, value: f64) -> Self {
         Dot {
+            uuid: next_dot_id(),
             direction,
             position,
             value,
-            id: 0,
+            addr: 0,
         }
     }
 
@@ -33,8 +49,8 @@ impl Dot {
         self
     }
 
-    pub fn set_id(&mut self, new_id: u64) -> &mut Self {
-        self.id = new_id;
+    pub fn set_addr(&mut self, new_id: u64) -> &mut Self {
+        self.addr = new_id;
         self
     }
 

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+log = "0.4.29"
 miette = "7.6.0"
 rustc-hash = "2.1.1"
 thiserror = "2.0.18"
