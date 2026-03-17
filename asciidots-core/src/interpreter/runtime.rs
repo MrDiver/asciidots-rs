@@ -3,7 +3,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     parser::{LexError, SpanToken, Token},
-    primitives::{Direction, Position},
+    primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
 };
 
@@ -83,10 +83,20 @@ impl DotsInterpreter {
                         }
                     }
                 }
-                Token::Operator { orientation, repr } => {
+                Token::Operator {
+                    kind,
+                    orientation,
+                    repr,
+                } => {
                     self.operator_map.insert(
                         (token.col(), token.line()),
-                        OperatorQueues::new(orientation, repr),
+                        OperatorQueues::new(orientation, repr, kind, false),
+                    );
+                }
+                Token::Conditional(negated, kind) => {
+                    self.operator_map.insert(
+                        (token.col(), token.line()),
+                        OperatorQueues::new(Orientation::Horizontal, '~', kind, negated),
                     );
                 }
                 _ => {}

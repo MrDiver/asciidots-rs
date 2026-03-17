@@ -9,7 +9,7 @@ use crate::{
     primitives::{Direction, Orientation, Position},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum SetKind {
     Addr,
     Value,
@@ -98,7 +98,7 @@ impl MachineState {
         })
     }
 
-    pub(super) fn asserting() -> MachineState {
+    pub fn asserting() -> MachineState {
         MachineState::Asserting(AssertingState {
             accumulator: String::default(),
             inside_quote: false,
@@ -192,6 +192,24 @@ impl MachineStateExecutor for TravelState {
             Token::Operator { .. } => {
                 return Ok(MachineEvent::HitOperator);
             }
+            Token::Conditional(_, _) if dot.direction() == Direction::Down => {
+                return Ok(MachineEvent::Died);
+            }
+            Token::Conditional(_, _) => {
+                return Ok(MachineEvent::HitOperator);
+            }
+            Token::Filter(true) => {
+                if dot.value == 1.0 {
+                    return Ok(MachineEvent::Died);
+                }
+                dot.step();
+            }
+            Token::Filter(false) => {
+                if dot.value == 0.0 {
+                    return Ok(MachineEvent::Died);
+                }
+                dot.step();
+            }
             _ => return Ok(MachineEvent::Died),
         };
         Ok(MachineEvent::Nothing)
@@ -211,7 +229,9 @@ impl MachineStateExecutor for TravelState {
             | Token::Digit(_)
             | Token::OperatorBegin(_)
             | Token::OperatorEnd(_)
-            | Token::Operator { .. } => StateTransition::Stay,
+            | Token::Operator { .. }
+            | Token::Filter(_)
+            | Token::Conditional(_, _) => StateTransition::Stay,
             _ => StateTransition::Transition,
         }
     }
@@ -288,7 +308,10 @@ impl MachineStateExecutor for WaitingState {
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Waiting", dot.uuid);
         match token.inner() {
-            Token::OperatorBegin(_) | Token::OperatorEnd(_) | Token::Operator { .. } => {
+            Token::OperatorBegin(_)
+            | Token::OperatorEnd(_)
+            | Token::Operator { .. }
+            | Token::Conditional(_, _) => {
                 dot.step();
             }
             _ => {
@@ -435,4 +458,3 @@ impl MachineStateExecutor for AssertingState {
         }
     }
 }
-

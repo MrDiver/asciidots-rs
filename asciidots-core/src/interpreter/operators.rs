@@ -1,4 +1,9 @@
-use crate::{primitives::Orientation, state_machine::DotMachine};
+use log::trace;
+
+use crate::{
+    primitives::{Direction, Orientation},
+    state_machine::{DotMachine, SetKind},
+};
 use std::{collections::VecDeque, ops::Rem};
 
 /// A small queue for dots waiting at one side of an operator.
@@ -37,15 +42,19 @@ impl DotQueue {
 pub struct OperatorQueues {
     orientation: Orientation,
     op: char,
+    kind: SetKind,
+    negated: bool,
     horizontal: DotQueue,
     vertical: DotQueue,
 }
 
 impl OperatorQueues {
-    pub(super) fn new(orientation: Orientation, op: char) -> Self {
+    pub(super) fn new(orientation: Orientation, op: char, kind: SetKind, negated: bool) -> Self {
         Self {
             orientation,
             op,
+            kind,
+            negated,
             horizontal: DotQueue::default(),
             vertical: DotQueue::default(),
         }
@@ -70,7 +79,22 @@ impl OperatorQueues {
                 }
             };
 
-            let a = primary.value();
+            if self.op == '~' {
+                let condition = secondary;
+                let mut new_dot = primary.dot();
+                if condition.value() as u64 == 0 {
+                    new_dot.set_dir(Direction::Up);
+                }
+                primary.replace_dot(new_dot);
+                trace!("Returning from operator: {:?}", primary);
+                return Some(primary);
+            }
+
+            let a = if self.kind == SetKind::Value {
+                primary.value()
+            } else {
+                primary.addr() as f64
+            };
             let b = secondary.value();
             let new_val = match self.op {
                 '+' => a + b,
@@ -127,7 +151,10 @@ impl OperatorQueues {
                 _ => a,
             };
             let mut new_dot = primary.dot();
-            new_dot.set_value(new_val);
+            match self.kind {
+                SetKind::Value => new_dot.set_value(new_val),
+                SetKind::Addr => new_dot.set_addr(new_val as u64),
+            };
             primary.replace_dot(new_dot);
             return Some(primary);
         }

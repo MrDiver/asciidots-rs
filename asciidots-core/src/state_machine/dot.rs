@@ -57,4 +57,8 @@ impl Dot {
     pub fn orientation(&self) -> Orientation {
         self.direction.orientation()
     }
+
+    pub(crate) fn direction(&self) -> Direction {
+        self.direction
+    }
 }

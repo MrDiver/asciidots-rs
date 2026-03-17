@@ -1,5 +1,3 @@
-use std::io::Empty;
-
 use crate::{
     parser::{SpanToken, Token},
     primitives::{Direction, Position},
@@ -125,13 +123,16 @@ impl DotMachine {
                 Token::ValueMarker => MachineState::set(SetKind::Value),
                 Token::AddrMarker => MachineState::set(SetKind::Addr),
                 Token::Write => MachineState::printing(),
+                Token::Assertion => MachineState::asserting(),
                 Token::Pipe(_)
                 | Token::CrossPipe
                 | Token::Duplicate
                 | Token::Mirror(_)
                 | Token::ForceDirection(_)
+                | Token::Conditional(_, _)
                 | Token::OperatorBegin(_)
                 | Token::OperatorEnd(_)
+                | Token::Filter(_)
                 | Token::Operator { .. } => MachineState::travel(),
                 _ => return,
             }

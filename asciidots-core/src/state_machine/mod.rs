@@ -8,4 +8,4 @@ pub use dot::Dot;
 pub use error::RuntimeDiagnostic;
 pub use event::MachineEvent;
 pub use machine::DotMachine;
-pub use states::MachineState;
+pub use states::{MachineState, SetKind};

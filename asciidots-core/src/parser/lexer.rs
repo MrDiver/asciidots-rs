@@ -1,6 +1,7 @@
 use super::error::LexError;
 use super::token::{MirrorKind, SpanToken, Token};
 use crate::primitives::{Direction, Orientation};
+use crate::state_machine::SetKind;
 use miette::SourceSpan;
 
 pub struct Lexer {
@@ -96,13 +97,29 @@ impl Lexer {
         }
     }
 
+    fn at(&self, x: usize, y: usize) -> Option<&char> {
+        self.grid.get(y).and_then(|row| row.get(x))
+    }
+
+    fn get_kind(&self, x: usize, y: usize) -> SetKind {
+        match self.at(x, y) {
+            Some('@') => SetKind::Addr,
+            _ => SetKind::Value,
+        }
+    }
+
     fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, LexError> {
         if !matches!(character, '[' | ']' | '{' | '}')
             && let Some(orientation) = self.get_operator(x, y)
         {
+            let kind = x
+                .checked_sub(1)
+                .map(|x| self.get_kind(x, y))
+                .unwrap_or(SetKind::Value);
             return Ok(Token::Operator {
                 orientation,
                 repr: character,
+                kind,
             });
         }
 
@@ -113,7 +130,7 @@ impl Lexer {
             '-' => Ok(Token::Pipe(Orientation::Horizontal)),
             '/' => Ok(Token::Mirror(MirrorKind::Forward)),
             '\\' => Ok(Token::Mirror(MirrorKind::Backward)),
-            '[' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
+            '[' => match self.at(x + 2, y) {
                 Some(']') => Ok(Token::OperatorBegin(Orientation::Vertical)),
                 c => Err(LexError::missing_closing_brace(
                     *c.unwrap_or(&' '),
@@ -122,10 +139,7 @@ impl Lexer {
                     Orientation::Vertical,
                 )),
             },
-            ']' => match x
-                .checked_sub(2)
-                .and_then(|idx| self.grid.get(y).and_then(|row| row.get(idx)))
-            {
+            ']' => match x.checked_sub(2).and_then(|idx| self.at(idx, y)) {
                 Some('[') => Ok(Token::OperatorEnd(Orientation::Vertical)),
                 c => Err(LexError::missing_opening_brace(
                     *c.unwrap_or(&' '),
@@ -134,7 +148,7 @@ impl Lexer {
                     Orientation::Vertical,
                 )),
             },
-            '{' => match self.grid.get(y).and_then(|row| row.get(x + 2)) {
+            '{' => match self.at(x + 2, y) {
                 Some('}') => Ok(Token::OperatorBegin(Orientation::Horizontal)),
                 c => Err(LexError::missing_closing_brace(
                     *c.unwrap_or(&' '),
@@ -143,10 +157,7 @@ impl Lexer {
                     Orientation::Horizontal,
                 )),
             },
-            '}' => match x
-                .checked_sub(2)
-                .and_then(|idx| self.grid.get(y).and_then(|row| row.get(idx)))
-            {
+            '}' => match x.checked_sub(2).and_then(|idx| self.at(idx, y)) {
                 Some('{') => Ok(Token::OperatorEnd(Orientation::Horizontal)),
                 c => Err(LexError::missing_opening_brace(
                     *c.unwrap_or(&' '),
@@ -161,11 +172,17 @@ impl Lexer {
             '@' => Ok(Token::AddrMarker),
             '?' => Ok(Token::Read),
             '$' => Ok(Token::Write),
-            '~' => match self.grid.get(y + 1).and_then(|row| row.get(x)) {
-                Some('!') => Ok(Token::Conditonal(true)),
-                Some(_) => Ok(Token::Conditonal(false)),
-                _ => Err(LexError::missing_conditional_path(self.span(x, y, 1))),
-            },
+            '~' => {
+                let kind = x
+                    .checked_sub(1)
+                    .map(|x| self.get_kind(x, y))
+                    .unwrap_or(SetKind::Value);
+                match self.at(x, y + 1) {
+                    Some('!') => Ok(Token::Conditional(true, kind)),
+                    Some(_) => Ok(Token::Conditional(false, kind)),
+                    _ => Err(LexError::missing_conditional_path(self.span(x, y, 1))),
+                }
+            }
             '!' => Ok(Token::Negate),
             '"' => Ok(Token::Quote),
             '\'' => Ok(Token::QuoteStream),

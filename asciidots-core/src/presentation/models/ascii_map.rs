@@ -54,7 +54,7 @@ impl GridModel for AsciiMapModel<'_> {
                 Token::Digit(_) => GridCellKind::ActiveOperator,
                 Token::Char(_) => GridCellKind::ActiveOperator,
                 Token::Duplicate => GridCellKind::Command,
-                Token::Conditonal(_) => GridCellKind::Command,
+                Token::Conditional(_, _) => GridCellKind::Command,
                 Token::ValueMarker => GridCellKind::Command,
                 Token::Write => GridCellKind::Command,
                 Token::Read => GridCellKind::Command,
