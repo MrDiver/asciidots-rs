@@ -4,8 +4,8 @@ use crate::{
 };
 
 pub struct DotDebugTableModel {
-    headers: [String; 5],
-    rows: Vec<[TableCell; 5]>,
+    headers: [String; 6],
+    rows: Vec<[TableCell; 6]>,
 }
 
 impl DotDebugTableModel {
@@ -14,24 +14,26 @@ impl DotDebugTableModel {
             .iter()
             .map(|dot| {
                 [
-                    TableCell::new(format!("{}", dot.addr()), TableCellKind::Changing),
-                    TableCell::new(format!("{:.2}", dot.value()), TableCellKind::Default),
+                    TableCell::new(format!("{}", dot.dot().addr()), TableCellKind::Changing),
+                    TableCell::new(format!("{:.2}", dot.dot().value()), TableCellKind::Changing),
                     TableCell::new(format!("{}", dot.position().x), TableCellKind::Quote),
                     TableCell::new(format!("{}", dot.position().y), TableCellKind::Quote),
                     TableCell::new(dot.state_label(), TableCellKind::Active)
                         .with_bold(!dot.is_dead())
                         .with_strikethrough(dot.is_dead()),
+                    TableCell::new(format!("{:?}", dot.selector()), TableCellKind::Changeable),
                 ]
             })
             .collect();
 
         Self {
             headers: [
-                "ID".to_string(),
+                "Addr".to_string(),
                 "Value".to_string(),
                 "X".to_string(),
                 "Y".to_string(),
                 "State".to_string(),
+                "Selector".to_string(),
             ],
             rows,
         }

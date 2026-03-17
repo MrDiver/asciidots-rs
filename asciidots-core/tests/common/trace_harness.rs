@@ -24,7 +24,7 @@ fn sorted_position_values(interpreter: &DotsInterpreter) -> Vec<DotValueAtPos> {
         .iter()
         .map(|dot| {
             let pos = dot.position();
-            (pos.x, pos.y, dot.value())
+            (pos.x, pos.y, dot.dot().value())
         })
         .collect();
     values.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));

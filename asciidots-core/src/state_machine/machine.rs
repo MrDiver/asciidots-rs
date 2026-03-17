@@ -1,7 +1,7 @@
 use crate::{
     parser::{SpanToken, Token},
     primitives::{Direction, Position},
-    state_machine::states::SetKind,
+    state_machine::ValueSelector,
 };
 
 use super::dot::Dot;
@@ -39,23 +39,19 @@ impl DotMachine {
     }
 
     pub fn position(&self) -> &Position {
-        &self.dot.position
+        &self.dot.position()
     }
 
     pub fn direction(&self) -> &Direction {
-        &self.dot.direction
+        &self.dot.direction()
     }
 
-    pub fn value(&self) -> f64 {
-        self.dot.value
-    }
-
-    pub fn addr(&self) -> u64 {
-        self.dot.addr
+    pub fn selected(&self) -> f64 {
+        self.dot.selected()
     }
 
     pub fn uuid(&self) -> u64 {
-        self.dot.uuid
+        self.dot.uuid()
     }
 
     pub fn state_label(&self) -> &'static str {
@@ -72,6 +68,10 @@ impl DotMachine {
 
     pub fn replace_dot(&mut self, dot: Dot) {
         self.dot = dot;
+    }
+
+    pub fn selector(&self) -> ValueSelector {
+        self.dot.selector()
     }
 
     pub fn process(
@@ -120,8 +120,8 @@ impl DotMachine {
         if let StateTransition::Transition = transition {
             self.state = match lookahead.inner() {
                 Token::Empty => MachineState::dead(),
-                Token::ValueMarker => MachineState::set(SetKind::Value),
-                Token::AddrMarker => MachineState::set(SetKind::Addr),
+                Token::ValueMarker => MachineState::set(ValueSelector::Value),
+                Token::AddrMarker => MachineState::set(ValueSelector::Addr),
                 Token::Write => MachineState::printing(),
                 Token::Assertion => MachineState::asserting(),
                 Token::Pipe(_)
@@ -129,7 +129,7 @@ impl DotMachine {
                 | Token::Duplicate
                 | Token::Mirror(_)
                 | Token::ForceDirection(_)
-                | Token::Conditional(_, _)
+                | Token::Conditional(_)
                 | Token::OperatorBegin(_)
                 | Token::OperatorEnd(_)
                 | Token::Filter(_)
@@ -142,7 +142,7 @@ impl DotMachine {
 
 impl std::fmt::Display for DotMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Dot({:?} {:.2})", self.position(), self.dot.value)
+        write!(f, "Dot({:?} {:.2})", self.position(), self.dot.value())
     }
 }
 
@@ -153,8 +153,8 @@ impl std::fmt::Debug for DotMachine {
             "Dot({:?} {:?} {:?} {:?} {})",
             self.state,
             self.position(),
-            self.dot.direction,
-            self.dot.value,
+            self.dot.direction(),
+            self.dot.value(),
             self.is_dead()
         )
     }

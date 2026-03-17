@@ -83,20 +83,16 @@ impl DotsInterpreter {
                         }
                     }
                 }
-                Token::Operator {
-                    kind,
-                    orientation,
-                    repr,
-                } => {
+                Token::Operator { orientation, repr } => {
                     self.operator_map.insert(
                         (token.col(), token.line()),
-                        OperatorQueues::new(orientation, repr, kind, false),
+                        OperatorQueues::new(orientation, repr, false),
                     );
                 }
-                Token::Conditional(negated, kind) => {
+                Token::Conditional(negated) => {
                     self.operator_map.insert(
                         (token.col(), token.line()),
-                        OperatorQueues::new(Orientation::Horizontal, '~', kind, negated),
+                        OperatorQueues::new(Orientation::Horizontal, '~', negated),
                     );
                 }
                 _ => {}

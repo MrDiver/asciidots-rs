@@ -531,13 +531,7 @@ impl DotsView for RatatuiView {
 
                 let dots_table = Table::new(
                     dot_rows,
-                    [
-                        Constraint::Length(4),
-                        Constraint::Length(8),
-                        Constraint::Length(4),
-                        Constraint::Length(4),
-                        Constraint::Min(6),
-                    ],
+                    (0..dots_model.column_count()).map(|_column| Constraint::Min(4)),
                 )
                 .header(Row::new(dot_header_cells))
                 .column_spacing(1);

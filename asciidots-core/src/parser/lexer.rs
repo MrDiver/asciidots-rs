@@ -1,7 +1,6 @@
 use super::error::LexError;
 use super::token::{MirrorKind, SpanToken, Token};
 use crate::primitives::{Direction, Orientation};
-use crate::state_machine::SetKind;
 use miette::SourceSpan;
 
 pub struct Lexer {
@@ -101,25 +100,13 @@ impl Lexer {
         self.grid.get(y).and_then(|row| row.get(x))
     }
 
-    fn get_kind(&self, x: usize, y: usize) -> SetKind {
-        match self.at(x, y) {
-            Some('@') => SetKind::Addr,
-            _ => SetKind::Value,
-        }
-    }
-
     fn lex_char(&self, character: char, x: usize, y: usize) -> Result<Token, LexError> {
         if !matches!(character, '[' | ']' | '{' | '}')
             && let Some(orientation) = self.get_operator(x, y)
         {
-            let kind = x
-                .checked_sub(1)
-                .map(|x| self.get_kind(x, y))
-                .unwrap_or(SetKind::Value);
             return Ok(Token::Operator {
                 orientation,
                 repr: character,
-                kind,
             });
         }
 
@@ -172,17 +159,11 @@ impl Lexer {
             '@' => Ok(Token::AddrMarker),
             '?' => Ok(Token::Read),
             '$' => Ok(Token::Write),
-            '~' => {
-                let kind = x
-                    .checked_sub(1)
-                    .map(|x| self.get_kind(x, y))
-                    .unwrap_or(SetKind::Value);
-                match self.at(x, y + 1) {
-                    Some('!') => Ok(Token::Conditional(true, kind)),
-                    Some(_) => Ok(Token::Conditional(false, kind)),
-                    _ => Err(LexError::missing_conditional_path(self.span(x, y, 1))),
-                }
-            }
+            '~' => match self.at(x, y + 1) {
+                Some('!') => Ok(Token::Conditional(true)),
+                Some(_) => Ok(Token::Conditional(false)),
+                _ => Err(LexError::missing_conditional_path(self.span(x, y, 1))),
+            },
             '!' => Ok(Token::Negate),
             '"' => Ok(Token::Quote),
             '\'' => Ok(Token::QuoteStream),

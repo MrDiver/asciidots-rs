@@ -1,7 +1,4 @@
-use crate::{
-    primitives::{Direction, Orientation},
-    state_machine::SetKind,
-};
+use crate::primitives::{Direction, Orientation};
 
 #[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum MirrorKind {
@@ -17,7 +14,6 @@ pub enum Token {
     Mirror(MirrorKind),         // Forward / and Backward \
     OperatorBegin(Orientation), // Horizontal { and Vertical [
     Operator {
-        kind: SetKind,
         orientation: Orientation,
         repr: char,
     }, // Any char + - / * and so on
@@ -27,7 +23,7 @@ pub enum Token {
     AddrMarker,                 // @
     Read,                       // ?
     Write,                      // $
-    Conditional(bool, SetKind), // ~
+    Conditional(bool),          // ~
     Negate,                     // ! Does nothing
     Quote,                      // "
     QuoteStream,                // '
@@ -62,7 +58,7 @@ impl std::fmt::Display for Token {
             Token::AddrMarker => write!(f, "@"),
             Token::Read => write!(f, "?"),
             Token::Write => write!(f, "$"),
-            Token::Conditional(_, _) => write!(f, "~"),
+            Token::Conditional(_) => write!(f, "~"),
             Token::Negate => write!(f, "!"),
             Token::Quote => write!(f, "\""),
             Token::QuoteStream => write!(f, "'"),
@@ -107,7 +103,7 @@ impl From<Token> for char {
             Token::AddrMarker => '@',
             Token::Read => '?',
             Token::Write => '$',
-            Token::Conditional(_, _) => '~',
+            Token::Conditional(_) => '~',
             Token::Negate => '!',
             Token::Quote => '\"',
             Token::QuoteStream => '\'',

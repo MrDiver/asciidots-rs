@@ -2,13 +2,20 @@ use std::cell::RefCell;
 
 use crate::primitives::{Direction, Orientation, Position};
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ValueSelector {
+    Addr,
+    Value,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Dot {
-    pub direction: Direction,
-    pub position: Position,
-    pub value: f64,
-    pub addr: u64,
-    pub uuid: u64,
+    direction: Direction,
+    position: Position,
+    value: f64,
+    addr: f64,
+    uuid: u64,
+    selector: ValueSelector,
 }
 
 thread_local! {
@@ -30,7 +37,8 @@ impl Dot {
             direction,
             position,
             value,
-            addr: 0,
+            addr: 0.0,
+            selector: ValueSelector::Value,
         }
     }
 
@@ -49,8 +57,36 @@ impl Dot {
         self
     }
 
-    pub fn set_addr(&mut self, new_id: u64) -> &mut Self {
+    pub fn set_addr(&mut self, new_id: f64) -> &mut Self {
         self.addr = new_id;
+        self
+    }
+
+    pub fn set_selected(&mut self, value: f64) -> &mut Self {
+        if self.selector == ValueSelector::Value {
+            self.value = value;
+        } else {
+            self.addr = value;
+        }
+        self.selector = ValueSelector::Value;
+        self
+    }
+
+    pub fn selected(&self) -> f64 {
+        if self.selector == ValueSelector::Value {
+            self.value
+        } else {
+            self.addr
+        }
+    }
+
+    pub fn select(&mut self, value: ValueSelector) -> &mut Self {
+        self.selector = value;
+        self
+    }
+
+    pub fn reset_selector(&mut self) -> &mut Self {
+        self.selector = ValueSelector::Value;
         self
     }
 
@@ -58,7 +94,27 @@ impl Dot {
         self.direction.orientation()
     }
 
-    pub(crate) fn direction(&self) -> Direction {
-        self.direction
+    pub fn uuid(&self) -> u64 {
+        self.uuid
+    }
+
+    pub fn direction(&self) -> &Direction {
+        &self.direction
+    }
+
+    pub fn addr(&self) -> f64 {
+        self.addr
+    }
+
+    pub fn value(&self) -> f64 {
+        self.value
+    }
+
+    pub fn position(&self) -> &Position {
+        &self.position
+    }
+
+    pub fn selector(&self) -> ValueSelector {
+        self.selector
     }
 }
