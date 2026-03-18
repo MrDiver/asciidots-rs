@@ -7,6 +7,7 @@ use asciidots_core::presentation::{
     apply_result_to_output,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use miette::NamedSource;
 use ratatui::widgets::Paragraph;
 use ratatui::{
     DefaultTerminal,
@@ -611,8 +612,9 @@ impl DotsView for RatatuiView {
     }
 }
 
-pub fn run(content: &str) {
-    let mut app = RuntimeController::new(content).unwrap();
+pub fn run(content: &str) -> miette::Result<()> {
+    let mut app = RuntimeController::new(content)
+        .or_else(|e| Err(e.with_source_code(NamedSource::new("Source", content.to_string()))))?;
     let mut view = RatatuiView::new();
     loop {
         let command = view.poll_command();
@@ -632,4 +634,5 @@ pub fn run(content: &str) {
         }
         view.render(&app)
     }
+    Ok(())
 }

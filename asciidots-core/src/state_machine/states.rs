@@ -5,13 +5,15 @@ use super::error::RuntimeDiagnostic;
 use super::event::MachineEvent;
 use super::machine::DotMachine;
 use crate::{
-    parser::{MirrorKind, SpanToken, Token},
+    parser::{AsciiCell, MirrorKind, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::dot::ValueSelector,
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct TravelState;
+pub struct TravelState {
+    is_warping: bool,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct SetState {
@@ -53,7 +55,7 @@ pub enum MachineState {
 
 impl MachineState {
     pub(super) fn travel() -> Self {
-        MachineState::Travel(TravelState)
+        MachineState::Travel(TravelState { is_warping: false })
     }
 
     pub fn short_name(&self) -> &'static str {
@@ -125,22 +127,22 @@ impl MachineStateExecutor for TravelState {
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Travel", dot.uuid());
         match token.inner() {
-            Token::Dot => {
+            AsciiCell::Dot => {
                 dot.step();
             }
-            Token::Pipe(orientation) if *orientation == dot.orientation() => {
+            AsciiCell::Pipe(orientation) if *orientation == dot.orientation() => {
                 dot.step();
             }
-            Token::CrossPipe => {
+            AsciiCell::CrossPipe => {
                 dot.step();
             }
-            Token::ForceDirection(dir) => {
+            AsciiCell::ForceDirection(dir) => {
                 if dot.direction().orthogonal(dir) {
                     dot.set_dir(*dir);
                 }
                 dot.step();
             }
-            Token::Mirror(kind) => {
+            AsciiCell::Mirror(kind) => {
                 let Position { x, y } = (*dot.direction()).into();
                 let tmp = match kind {
                     MirrorKind::Forward => Position { x: -y, y: -x },
@@ -151,14 +153,14 @@ impl MachineStateExecutor for TravelState {
                     dot.set_dir(dir).step();
                 }
             }
-            Token::Reflector(kind) if dot.orientation() == Orientation::Horizontal => {
+            AsciiCell::Reflector(kind) if dot.orientation() == Orientation::Horizontal => {
                 match kind {
                     MirrorKind::Forward => dot.set_dir(Direction::Right),
                     MirrorKind::Backward => dot.set_dir(Direction::Left),
                 };
                 dot.step();
             }
-            Token::Duplicate => {
+            AsciiCell::Duplicate => {
                 pending_dots.reserve(2);
                 let dot_snapshot = *dot;
                 for d in &[
@@ -175,44 +177,45 @@ impl MachineStateExecutor for TravelState {
                 }
                 dot.step();
             }
-            Token::Digit(_) | Token::Char(_) => {
+            AsciiCell::Digit(_) | AsciiCell::Char(_) => {
                 dot.step();
             }
-            Token::OperatorBegin(_) | Token::OperatorEnd(_)
+            AsciiCell::OperatorBegin(_) | AsciiCell::OperatorEnd(_)
                 if matches!(dot.orientation(), Orientation::Horizontal) =>
             {
                 dot.step();
                 return Ok(MachineEvent::HitOperator);
             }
-            Token::Operator { .. } => {
+            AsciiCell::Operator { .. } => {
                 return Ok(MachineEvent::HitOperator);
             }
-            Token::Conditional(_) if *dot.direction() == Direction::Down => {
+            AsciiCell::Conditional(_) if *dot.direction() == Direction::Down => {
                 return Ok(MachineEvent::Died);
             }
-            Token::Conditional(_) => {
+            AsciiCell::Conditional(_) => {
                 return Ok(MachineEvent::HitOperator);
             }
-            Token::Filter(true) => {
+            AsciiCell::Filter(true) => {
                 if dot.selected() == 1.0 {
                     return Ok(MachineEvent::Died);
                 }
                 dot.step();
             }
-            Token::Filter(false) => {
+            AsciiCell::Filter(false) => {
                 if dot.selected() == 0.0 {
                     return Ok(MachineEvent::Died);
                 }
                 dot.step();
             }
-            // Token::ValueMarker => {
-            //     dot.select(ValueSelector::Value);
-            //     dot.step();
-            // }
-            // Token::AddrMarker => {
-            //     dot.select(ValueSelector::Addr);
-            //     dot.step();
-            // }
+            AsciiCell::Warp { other, .. } => {
+                if self.is_warping {
+                    dot.step();
+                    self.is_warping = false;
+                } else {
+                    dot.set_position(*other);
+                    self.is_warping = true;
+                }
+            }
             _ => return Ok(MachineEvent::Died),
         };
         Ok(MachineEvent::Nothing)
@@ -221,20 +224,21 @@ impl MachineStateExecutor for TravelState {
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Travel", dot.uuid());
         match token.inner() {
-            Token::Pipe(_)
-            | Token::CrossPipe
-            | Token::Mirror(_)
-            | Token::ForceDirection(_)
-            | Token::Reflector(_)
-            | Token::Duplicate
-            | Token::Dot
-            | Token::Char(_)
-            | Token::Digit(_)
-            | Token::OperatorBegin(_)
-            | Token::OperatorEnd(_)
-            | Token::Operator { .. }
-            | Token::Filter(_)
-            | Token::Conditional(_) => StateTransition::Stay,
+            AsciiCell::Pipe(_)
+            | AsciiCell::CrossPipe
+            | AsciiCell::Mirror(_)
+            | AsciiCell::ForceDirection(_)
+            | AsciiCell::Reflector(_)
+            | AsciiCell::Duplicate
+            | AsciiCell::Dot
+            | AsciiCell::Char(_)
+            | AsciiCell::Digit(_)
+            | AsciiCell::OperatorBegin(_)
+            | AsciiCell::OperatorEnd(_)
+            | AsciiCell::Operator { .. }
+            | AsciiCell::Filter(_)
+            | AsciiCell::Conditional(_)
+            | AsciiCell::Warp { .. } => StateTransition::Stay,
             _ => StateTransition::Transition,
         }
     }
@@ -258,14 +262,14 @@ impl MachineStateExecutor for SetState {
             return Ok(MachineEvent::Nothing);
         }
         match token.inner() {
-            Token::Digit(d) => {
+            AsciiCell::Digit(d) => {
                 if self.acc.is_none() {
                     self.acc = Some(0)
                 }
                 self.acc = self.acc.map(|acc| acc * 10 + *d as u64);
                 dot.step();
             }
-            Token::Read => {
+            AsciiCell::Read => {
                 dot.step();
                 return {
                     self.waiting_input = true;
@@ -293,7 +297,7 @@ impl MachineStateExecutor for SetState {
             return StateTransition::Stay;
         }
         match token.inner() {
-            Token::Read | Token::Digit(_) => StateTransition::Stay,
+            AsciiCell::Read | AsciiCell::Digit(_) => StateTransition::Stay,
             _ => {
                 match (self.acc, self.kind) {
                     (Some(acc), ValueSelector::Value) => {
@@ -321,10 +325,10 @@ impl MachineStateExecutor for WaitingState {
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Waiting", dot.uuid());
         match token.inner() {
-            Token::OperatorBegin(_)
-            | Token::OperatorEnd(_)
-            | Token::Operator { .. }
-            | Token::Conditional(_) => {
+            AsciiCell::OperatorBegin(_)
+            | AsciiCell::OperatorEnd(_)
+            | AsciiCell::Operator { .. }
+            | AsciiCell::Conditional(_) => {
                 dot.step();
             }
             _ => {
@@ -337,7 +341,7 @@ impl MachineStateExecutor for WaitingState {
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Waiting", dot.uuid());
         match token.inner() {
-            Token::OperatorBegin(_) | Token::OperatorEnd(_) => StateTransition::Stay,
+            AsciiCell::OperatorBegin(_) | AsciiCell::OperatorEnd(_) => StateTransition::Stay,
             _ => StateTransition::Transition,
         }
     }
@@ -353,44 +357,44 @@ impl MachineStateExecutor for PrintingState {
         trace!("[state{}] Process Printing", dot.uuid());
         if self.inside_quote {
             dot.step();
-            if *token.inner() == Token::Quote {
+            if matches!(*token.inner(), AsciiCell::Quote) {
                 self.inside_quote = false;
                 return Ok(MachineEvent::PrintLn(std::mem::take(&mut self.accumulator)));
             }
-            self.accumulator.push(char::from(*token.inner()));
+            self.accumulator.push(char::from(token.inner()));
             return Ok(MachineEvent::Nothing);
         } else if self.streaming {
             dot.step();
-            if *token.inner() == Token::QuoteStream {
+            if matches!(*token.inner(), AsciiCell::QuoteStream) {
                 self.streaming = false;
                 return Ok(MachineEvent::PrintLn(String::new()));
             }
-            return Ok(MachineEvent::PrintChar(char::from(*token.inner())));
+            return Ok(MachineEvent::PrintChar(char::from(token.inner())));
         }
         match token.inner() {
-            Token::Write => {
+            AsciiCell::Write => {
                 dot.step();
             }
-            Token::ValueMarker => {
+            AsciiCell::ValueMarker => {
                 dot.step();
                 return Ok(MachineEvent::PrintLn(dot.value().to_string()));
             }
-            Token::AddrMarker => {
+            AsciiCell::AddrMarker => {
                 dot.step();
                 return Ok(MachineEvent::PrintLn(dot.addr().to_string()));
             }
-            Token::QuoteStream => {
+            AsciiCell::QuoteStream => {
                 dot.step();
                 self.streaming = true;
             }
-            Token::Quote => {
+            AsciiCell::Quote => {
                 dot.step();
                 self.inside_quote = true;
             }
             c => {
                 return Err(RuntimeDiagnostic::invalid_printing_modifier(
-                    *c,
-                    (token.offset(), 1).into(),
+                    c.clone(),
+                    token.span(),
                 ));
             }
         };
@@ -403,7 +407,10 @@ impl MachineStateExecutor for PrintingState {
             StateTransition::Stay
         } else {
             match token.inner() {
-                Token::ValueMarker | Token::Quote | Token::QuoteStream | Token::AddrMarker
+                AsciiCell::ValueMarker
+                | AsciiCell::Quote
+                | AsciiCell::QuoteStream
+                | AsciiCell::AddrMarker
                     if !self.got_modifier =>
                 {
                     self.got_modifier = true;
@@ -425,14 +432,14 @@ impl MachineStateExecutor for AssertingState {
         trace!("[state{}] Process Asserting", dot.uuid());
         dot.step();
         if self.inside_quote {
-            if matches!(token.inner(), Token::Quote | Token::QuoteStream) {
+            if matches!(token.inner(), AsciiCell::Quote | AsciiCell::QuoteStream) {
                 self.inside_quote = false;
                 let expected: f64 = self.accumulator.parse().map_err(|_| {
                     RuntimeDiagnostic::failed_to_parse_assert(
                         std::mem::take(&mut self.accumulator),
                         {
                             let len = self.accumulator.len();
-                            (token.offset() - len, len).into()
+                            (token.span().offset() - len, len).into()
                         },
                     )
                 })?;
@@ -445,12 +452,12 @@ impl MachineStateExecutor for AssertingState {
                     })
                 }
             } else {
-                self.accumulator.push(char::from(*token.inner()));
+                self.accumulator.push(char::from(token.inner()));
                 Ok(MachineEvent::Nothing)
             }
         } else {
             match token.inner() {
-                Token::Quote | Token::QuoteStream => {
+                AsciiCell::Quote | AsciiCell::QuoteStream => {
                     self.inside_quote = true;
                 }
                 _ => {}
@@ -465,7 +472,7 @@ impl MachineStateExecutor for AssertingState {
             StateTransition::Stay
         } else {
             match token.inner() {
-                Token::Quote | Token::QuoteStream => StateTransition::Stay,
+                AsciiCell::Quote | AsciiCell::QuoteStream => StateTransition::Stay,
                 _ => StateTransition::Transition,
             }
         }

@@ -1,4 +1,4 @@
-use crate::parser::Token;
+use crate::parser::AsciiCell;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
@@ -6,10 +6,13 @@ use thiserror::Error;
 #[error("The Program died Unexpectedly")]
 pub enum RuntimeDiagnostic {
     None,
-    #[error("The printing modifier encountered is invalid {}", char::from(*_invalid))]
+    #[error(
+        "The printing modifier encountered is invalid {}",
+        char::from(_invalid)
+    )]
     #[diagnostic(help("Try: one of @, #, \"...\" or '...' "), severity(Warning))]
     InvalidPrintingModifier {
-        _invalid: Token,
+        _invalid: AsciiCell,
         #[label("this here")]
         _span: SourceSpan,
     },
@@ -38,7 +41,7 @@ pub enum RuntimeDiagnostic {
 }
 
 impl RuntimeDiagnostic {
-    pub fn invalid_printing_modifier(invalid: Token, span: SourceSpan) -> Self {
+    pub fn invalid_printing_modifier(invalid: AsciiCell, span: SourceSpan) -> Self {
         RuntimeDiagnostic::InvalidPrintingModifier {
             _invalid: invalid,
             _span: span,

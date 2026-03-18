@@ -6,5 +6,6 @@ edition = "2024"
 [dependencies]
 asciidots-core = {path="../asciidots-core/"}
 crossterm = "0.29.0"
+miette = "7.6.0"
 ratatui = "0.30.0"
 rustc-hash = "2.1.1"

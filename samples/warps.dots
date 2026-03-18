@@ -1,0 +1,9 @@
+warp AB
+warp C
+warp D
+import otherfile
+.--A       A--\
+              B
+B
+|
+\----

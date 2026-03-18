@@ -2,7 +2,7 @@ use log::trace;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    parser::{LexError, SpanToken, Token},
+    parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
 };
@@ -22,8 +22,10 @@ pub enum InterpreterCommand {
     InputAnswer(u64, f64),
 }
 
+#[derive(Debug)]
 pub struct DotsInterpreter {
     field: AsciiField,
+    functions: FxHashMap<String, Position>,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<RuntimeDiagnostic>,
@@ -32,10 +34,18 @@ pub struct DotsInterpreter {
 }
 
 impl DotsInterpreter {
-    pub fn from_string(content: &str) -> Result<Self, Vec<LexError>> {
-        let field = AsciiField::from_string(content)?;
+    pub fn from_string(source: &str) -> miette::Result<Self> {
+        let lex = Lexer::new(source);
+        let source = lex.run()?;
+        let parser = Parser::new(source);
+        let module = parser.run();
+        Ok(Self::new(module?))
+    }
+    pub fn new(module: DotsModule) -> Self {
+        let (field, functions) = module.unpack();
         let mut state = DotsInterpreter {
             field,
+            functions: functions.iter().map(|f| f.clone().unpack()).collect(),
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
@@ -43,7 +53,7 @@ impl DotsInterpreter {
             results: Vec::with_capacity(10),
         };
         state.initialize();
-        Ok(state)
+        state
     }
 
     pub fn get_field(&self) -> &AsciiField {
@@ -51,10 +61,10 @@ impl DotsInterpreter {
     }
 
     fn initialize(&mut self) {
-        for token in self.field.get_field() {
-            let position = Position::new(token.col() as i32, token.line() as i32);
+        for (x, y, token) in self.field.into_iter() {
+            let position: Position = (x, y).into();
             match *token.inner() {
-                Token::Dot => {
+                AsciiCell::Dot => {
                     for direction in &[
                         Direction::Up,
                         Direction::Right,
@@ -63,35 +73,29 @@ impl DotsInterpreter {
                     ] {
                         let offsetpos = position + (*direction).into();
                         match self.field.at(&offsetpos) {
-                            Token::Pipe(orientation) if orientation == direction.orientation() => {
-                                self.dots.push(DotMachine::new(
-                                    *direction,
-                                    token.col() as i32,
-                                    token.line() as i32,
-                                ));
+                            AsciiCell::Pipe(orientation)
+                                if *orientation == direction.orientation() =>
+                            {
+                                self.dots
+                                    .push(DotMachine::new(*direction, position.x, position.y));
                                 break;
                             }
-                            Token::CrossPipe | Token::Mirror(_) => {
-                                self.dots.push(DotMachine::new(
-                                    *direction,
-                                    token.col() as i32,
-                                    token.line() as i32,
-                                ));
+                            AsciiCell::CrossPipe | AsciiCell::Mirror(_) => {
+                                self.dots
+                                    .push(DotMachine::new(*direction, position.x, position.y));
                                 break;
                             }
                             _ => {}
                         }
                     }
                 }
-                Token::Operator { orientation, repr } => {
-                    self.operator_map.insert(
-                        (token.col(), token.line()),
-                        OperatorQueues::new(orientation, repr, false),
-                    );
+                AsciiCell::Operator { orientation, repr } => {
+                    self.operator_map
+                        .insert((x, y), OperatorQueues::new(orientation, repr, false));
                 }
-                Token::Conditional(negated) => {
+                AsciiCell::Conditional(negated) => {
                     self.operator_map.insert(
-                        (token.col(), token.line()),
+                        (x, y),
                         OperatorQueues::new(Orientation::Horizontal, '~', negated),
                     );
                 }
@@ -101,6 +105,7 @@ impl DotsInterpreter {
     }
 
     fn interpret(&mut self) {
+        let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
         let mut i = 0;
         let mut repeat_iteration = false;
         while i < self.dots.len() {
@@ -120,10 +125,7 @@ impl DotsInterpreter {
                 MachineEvent::HitOperator => {
                     let mut dot = self.dots.swap_remove(i);
                     let pos = dot.position();
-                    dot.next(
-                        &event,
-                        &SpanToken::new(Token::Empty, pos.x as usize, pos.y as usize, ' ', 0),
-                    );
+                    dot.next(&event, &default_token);
                     let opqueue = self
                         .operator_map
                         .get_mut(&(dot.position().into()))
@@ -153,7 +155,7 @@ impl DotsInterpreter {
                     self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
                         expected,
                         found,
-                        (self.field.at_spanned(dot.position()).offset(), 1).into(),
+                        self.field.at_spanned(dot.position()).span(),
                     ))
                 }
                 _ => {
@@ -218,24 +220,5 @@ impl DotsInterpreter {
 
     pub fn queues(&self) -> &FxHashMap<(usize, usize), OperatorQueues> {
         &self.operator_map
-    }
-}
-
-impl std::fmt::Debug for DotsInterpreter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
-            f,
-            "Tokens: {:?}",
-            self.field
-                .get_field()
-                .iter()
-                .map(|token| token.inner())
-                .collect::<Vec<_>>()
-        )?;
-        writeln!(f, "Dots:")?;
-        for dot in &self.dots {
-            writeln!(f, "{}", dot)?;
-        }
-        Ok(())
     }
 }

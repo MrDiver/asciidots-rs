@@ -52,6 +52,27 @@ impl Position {
     }
 }
 
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            x: Default::default(),
+            y: Default::default(),
+        }
+    }
+}
+
+impl From<(i32, i32)> for Position {
+    fn from(value: (i32, i32)) -> Self {
+        Position::new(value.0, value.1)
+    }
+}
+
+impl From<(usize, usize)> for Position {
+    fn from(value: (usize, usize)) -> Self {
+        Position::new(value.0 as i32, value.1 as i32)
+    }
+}
+
 impl From<Direction> for Position {
     fn from(dir: Direction) -> Self {
         match dir {

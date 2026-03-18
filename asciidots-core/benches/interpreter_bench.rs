@@ -1,5 +1,5 @@
 use asciidots_core::interpreter::{AsciiField, DotsInterpreter};
-use asciidots_core::parser::Token;
+use asciidots_core::parser::AsciiCell;
 use asciidots_core::parser::{Lexer, SpanToken};
 use asciidots_core::primitives::{Direction, Position};
 use asciidots_core::state_machine::{Dot, DotMachine};
@@ -54,7 +54,7 @@ fn bench_parsing(c: &mut Criterion) {
         let src = *src;
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let parsed = AsciiField::from_string(black_box(src))
+                let parsed = AsciiField::new(black_box(src))
                     .expect("parsing should succeed for benchmark input");
                 black_box(parsed);
             })
@@ -67,7 +67,7 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
     c.bench_function("interpreter_single_dot", |b| {
         b.iter(|| {
             let mut dot = DotMachine::from(Dot::new(Direction::Right, Position::new(10, 10), 0.0));
-            let token = Token::ForceDirection(Direction::Down);
+            let token = AsciiCell::ForceDirection(Direction::Down);
             let spanned = SpanToken::temporary(token);
             let mut pending_dots = Vec::with_capacity(2);
 
@@ -81,8 +81,7 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
 }
 
 fn make_initialized_program(source: &str) -> DotsInterpreter {
-    DotsInterpreter::from_string(source)
-        .expect("program parsing should succeed for benchmark input")
+    DotsInterpreter::new(source).expect("program parsing should succeed for benchmark input")
 }
 
 /// Step N times without checking for termination.
@@ -266,7 +265,7 @@ fn bench_heavy_workloads(c: &mut Criterion) {
 
     group.bench_function("superbig_parse", |b| {
         b.iter(|| {
-            let parsed = AsciiField::from_string(black_box(SUPERBIG))
+            let parsed = AsciiField::new(black_box(SUPERBIG))
                 .expect("parsing should succeed for benchmark input");
             black_box(parsed);
         })

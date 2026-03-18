@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::{
-    interpreter::AsciiField, parser::Token, primitives::Position, state_machine::DotMachine,
+    interpreter::AsciiField, parser::AsciiCell, primitives::Position, state_machine::DotMachine,
 };
 
 use crate::presentation::model_traits::{GridCell, GridCellKind, GridModel};
@@ -47,17 +47,19 @@ impl GridModel for AsciiMapModel<'_> {
             GridCellKind::ActiveDot
         } else {
             match token {
-                Token::Quote => GridCellKind::Quote,
-                Token::QuoteStream => GridCellKind::Quote,
-                Token::OperatorBegin(_) | Token::OperatorEnd(_) => GridCellKind::OperatorDelimiter,
-                Token::Operator { .. } => GridCellKind::Operator,
-                Token::Digit(_) => GridCellKind::ActiveOperator,
-                Token::Char(_) => GridCellKind::ActiveOperator,
-                Token::Duplicate => GridCellKind::Command,
-                Token::Conditional(_) => GridCellKind::Command,
-                Token::ValueMarker => GridCellKind::Command,
-                Token::Write => GridCellKind::Command,
-                Token::Read => GridCellKind::Command,
+                AsciiCell::Quote => GridCellKind::Quote,
+                AsciiCell::QuoteStream => GridCellKind::Quote,
+                AsciiCell::OperatorBegin(_) | AsciiCell::OperatorEnd(_) => {
+                    GridCellKind::OperatorDelimiter
+                }
+                AsciiCell::Operator { .. } => GridCellKind::Operator,
+                AsciiCell::Digit(_) => GridCellKind::ActiveOperator,
+                AsciiCell::Char(_) => GridCellKind::ActiveOperator,
+                AsciiCell::Duplicate => GridCellKind::Command,
+                AsciiCell::Conditional(_) => GridCellKind::Command,
+                AsciiCell::ValueMarker => GridCellKind::Command,
+                AsciiCell::Write => GridCellKind::Command,
+                AsciiCell::Read => GridCellKind::Command,
                 _ => GridCellKind::Default,
             }
         };

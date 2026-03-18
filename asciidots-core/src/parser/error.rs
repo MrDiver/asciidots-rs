@@ -1,88 +1,104 @@
-use crate::{parser::Token, primitives::Orientation};
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
 
-#[derive(Error, Debug, Diagnostic, Clone)]
+#[derive(Error, Debug, Diagnostic)]
 pub enum LexError {
-    #[error("missing opening brace for operator found '{}' instead", _ch_found)]
-    #[diagnostic(help("operators need braces: try '{}'", _expected_full))]
-    MissingOpeningBrace {
-        _ch_expected: char,
-        _ch_found: char,
-        _expected_full: String,
-        #[label("Expected '{_ch_expected}' here")]
-        _at_span: SourceSpan,
-        #[label("operator")]
-        _op_span: SourceSpan,
+    #[error("parse error: {help}")]
+    #[diagnostic(code(asciidots::lex::parse_error))]
+    LexingFailure {
+        help: String,
+        #[label("here")]
+        span: SourceSpan,
     },
-    #[error("missing closing brace for operator found '{}' instead", _ch_found)]
-    #[diagnostic(help("operators need braces: try '{}'", _expected_full))]
-    MissingClosingBrace {
-        _ch_expected: char,
-        _ch_found: char,
-        _expected_full: String,
-        #[label("Expected '{_ch_expected}' here")]
-        _at_span: SourceSpan,
-        #[label("operator")]
-        _op_span: SourceSpan,
+
+    #[error("unexpected input")]
+    #[diagnostic(code(asciidots::lex::unexpected_input), help("{help}"))]
+    UnexpectedInput {
+        help: String,
+        #[label("here")]
+        span: SourceSpan,
     },
-    #[error("missing condition path (guaranteed deadlock)")]
-    #[diagnostic(help(""))]
-    MissingConditionalPath {
-        #[label("There needs to be a path here")]
-        _at_span: SourceSpan,
+
+    #[error("unexpected end of file")]
+    #[diagnostic(code(asciidots::lex::unexpected_eof))]
+    UnexpectedEof {
+        #[label("file ends here")]
+        span: SourceSpan,
     },
-}
-
-impl LexError {
-    pub fn missing_opening_brace(
-        found: char,
-        at_span: SourceSpan,
-        op_span: SourceSpan,
-        orientation: Orientation,
-    ) -> Self {
-        LexError::MissingOpeningBrace {
-            _ch_expected: Token::OperatorBegin(orientation).into(),
-            _ch_found: found,
-            _expected_full: format!(
-                "{}?{}",
-                char::from(Token::OperatorBegin(orientation)),
-                char::from(Token::OperatorEnd(orientation))
-            ),
-            _at_span: at_span,
-            _op_span: op_span,
-        }
-    }
-
-    pub fn missing_closing_brace(
-        found: char,
-        at_span: SourceSpan,
-        op_span: SourceSpan,
-        orientation: Orientation,
-    ) -> Self {
-        LexError::MissingClosingBrace {
-            _ch_expected: Token::OperatorEnd(orientation).into(),
-            _ch_found: found,
-            _expected_full: format!(
-                "{}?{}",
-                char::from(Token::OperatorBegin(orientation)),
-                char::from(Token::OperatorEnd(orientation))
-            ),
-            _at_span: at_span,
-            _op_span: op_span,
-        }
-    }
-
-    pub fn missing_conditional_path(at_span: SourceSpan) -> Self {
-        LexError::MissingConditionalPath { _at_span: at_span }
-    }
+    #[error("invalid whitespace found")]
+    #[diagnostic(code(asciidots::lex::invalid_whitespace))]
+    InvalidWhitespaceCharacter {
+        c: char,
+        #[label("Remove this {:#?}", c)]
+        span: SourceSpan,
+    },
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("{} problem(s) found", _errors.len())]
-pub struct LexErrors {
-    #[source_code]
-    pub _src: miette::NamedSource<String>,
+pub enum ParsingError {
+    #[error("parse error: missing brace")]
+    #[diagnostic(
+        code(asciidots::parse::missing_brace),
+        help("Try adding a '{expected}'")
+    )]
+    MissingOpeningBrace {
+        expected: char,
+        #[label("here")]
+        span: SourceSpan,
+    },
+    #[error("parse error: invalid whitespace character {c}, only use spaces not tabs")]
+    #[diagnostic(
+        code(asciidots::parse::invalid_whitespace),
+        help("Try removing this whitespace and replacing with space")
+    )]
+    InvalidWhitespace {
+        c: char,
+        #[label("here")]
+        span: SourceSpan,
+    },
+    #[error("parse error: a function call operator shall always be called with a name")]
+    #[diagnostic(
+        code(asciidots::parse::missing_name),
+        help("Try adding a name next to the call operator")
+    )]
+    MissingNameForCallOperator {
+        #[label("missing name")]
+        span: miette::SourceSpan,
+    },
+    #[error("parse error: You can not mix braces for operators, even if that would be cool :D")]
+    #[diagnostic(
+        code(asciidots::parse::mismatching_brace),
+        help("Try changing the brace to be '{expected}'")
+    )]
+    MismatchingBrace {
+        expected: char,
+
+        #[label("mismatching brace expected '{expected}'")]
+        span: miette::SourceSpan,
+    },
+    #[error(
+        "parse error: Missing destination for Warp, always have two warps in order for them to work"
+    )]
+    #[diagnostic(
+        code(asciidots::parse::missing_destination),
+        help("Try adding another warp, by adding '{c}' somewhere on the map")
+    )]
+    MissingDestinationForWarp {
+        c: char,
+        #[label("Sink here")]
+        span: miette::SourceSpan,
+    },
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("Parsing Failures")]
+pub struct ParsingErrorCollection {
     #[related]
-    pub _errors: Vec<LexError>,
+    errors: Vec<ParsingError>,
+}
+
+impl ParsingErrorCollection {
+    pub fn new(errors: Vec<ParsingError>) -> Self {
+        Self { errors }
+    }
 }

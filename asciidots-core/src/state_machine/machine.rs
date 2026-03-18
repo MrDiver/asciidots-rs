@@ -1,5 +1,5 @@
 use crate::{
-    parser::{SpanToken, Token},
+    parser::{AsciiCell, SpanToken},
     primitives::{Direction, Position},
     state_machine::ValueSelector,
 };
@@ -119,21 +119,21 @@ impl DotMachine {
 
         if let StateTransition::Transition = transition {
             self.state = match lookahead.inner() {
-                Token::Empty => MachineState::dead(),
-                Token::ValueMarker => MachineState::set(ValueSelector::Value),
-                Token::AddrMarker => MachineState::set(ValueSelector::Addr),
-                Token::Write => MachineState::printing(),
-                Token::Assertion => MachineState::asserting(),
-                Token::Pipe(_)
-                | Token::CrossPipe
-                | Token::Duplicate
-                | Token::Mirror(_)
-                | Token::ForceDirection(_)
-                | Token::Conditional(_)
-                | Token::OperatorBegin(_)
-                | Token::OperatorEnd(_)
-                | Token::Filter(_)
-                | Token::Operator { .. } => MachineState::travel(),
+                AsciiCell::Empty => MachineState::dead(),
+                AsciiCell::ValueMarker => MachineState::set(ValueSelector::Value),
+                AsciiCell::AddrMarker => MachineState::set(ValueSelector::Addr),
+                AsciiCell::Write => MachineState::printing(),
+                AsciiCell::Assertion => MachineState::asserting(),
+                AsciiCell::Pipe(_)
+                | AsciiCell::CrossPipe
+                | AsciiCell::Duplicate
+                | AsciiCell::Mirror(_)
+                | AsciiCell::ForceDirection(_)
+                | AsciiCell::Conditional(_)
+                | AsciiCell::OperatorBegin(_)
+                | AsciiCell::OperatorEnd(_)
+                | AsciiCell::Filter(_)
+                | AsciiCell::Operator { .. } => MachineState::travel(),
                 _ => return,
             }
         }

@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 log = "0.4.29"
 miette = "7.6.0"
+nom = "8.0.0"
+nom_locate = "5.0.0"
 rustc-hash = "2.1.1"
 thiserror = "2.0.18"
 

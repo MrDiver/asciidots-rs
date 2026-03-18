@@ -117,4 +117,9 @@ impl Dot {
     pub fn selector(&self) -> ValueSelector {
         self.selector
     }
+
+    pub fn set_position(&mut self, other: Position) -> &mut Self {
+        self.position = other;
+        self
+    }
 }

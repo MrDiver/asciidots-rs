@@ -41,8 +41,7 @@ fn step_n(interpreter: &mut DotsInterpreter, n: usize) {
 
 #[allow(unused)]
 pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
+    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
 
     for (tick, expected_positions) in expected.iter().enumerate() {
         let got = sorted_positions(&interpreter);
@@ -58,8 +57,7 @@ pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
 }
 
 pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
+    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
 
     for (tick, expected_values) in expected.iter().enumerate() {
         let got = sorted_position_values(&interpreter);
@@ -91,8 +89,7 @@ pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
 }
 
 fn ticks_until_halt(program: &str, max_ticks: usize) -> usize {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
+    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
     let mut ticks = 0usize;
     while interpreter.num_dots() > 0 {
         assert!(

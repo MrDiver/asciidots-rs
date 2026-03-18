@@ -1,8 +1,11 @@
-use std::time::{Duration, Instant};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
-    parser::LexError,
+    parser::{LexError, Lexer},
 };
 
 use super::models::{AsciiMapModel, DotDebugTableModel, SettingsTableModel};
@@ -36,7 +39,7 @@ impl RuntimeController {
     const MIN_STEPS_PER_FRAME: usize = 1;
     const MAX_STEPS_PER_FRAME: usize = 10_000;
 
-    pub fn new(content: &str) -> Result<Self, Vec<LexError>> {
+    pub fn new(content: &str) -> miette::Result<Self> {
         let interpreter = DotsInterpreter::from_string(content)?;
         Ok(Self {
             interpreter,

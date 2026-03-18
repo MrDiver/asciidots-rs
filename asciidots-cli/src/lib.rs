@@ -2,28 +2,31 @@ use std::io::{self, Write};
 
 use asciidots_core::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
-    parser::{LexErrors, Lexer},
+    parser::{LexError, Lexer},
 };
-use miette::{IntoDiagnostic, NamedSource};
+use miette::{Diagnostic, IntoDiagnostic, NamedSource, SourceCode};
+use thiserror::Error;
 
-pub fn check(content: &str) -> Result<(), LexErrors> {
-    let mut lexer: Lexer = content.into();
-    lexer.run();
+#[derive(Error, Diagnostic, Debug)]
+#[error("Lex Error")]
+pub struct LexDiagnostics {
+    #[related]
+    diagnostics: Vec<LexError>,
+}
 
-    match lexer.finish() {
+pub fn check(content: &str) -> miette::Result<()> {
+    let lexer: Lexer = Lexer::new(content);
+
+    match lexer.run() {
         Ok(_) => Ok(()),
-        Err(e) => Err(LexErrors {
-            _src: NamedSource::new("Some Dots", content.to_string()),
-            _errors: e,
-        }),
+        // TODO: Make better error wrapper
+        Err(e) => Err(e),
     }
 }
 
 pub fn run(content: &str) -> miette::Result<()> {
-    let mut interpreter = DotsInterpreter::from_string(content).map_err(|e| LexErrors {
-        _src: NamedSource::new("Some Dots", content.to_string()),
-        _errors: e,
-    })?;
+    let mut interpreter = DotsInterpreter::from_string(content)
+        .or_else(|e| Err(e.with_source_code(NamedSource::new("Source", content.to_string()))))?;
 
     'outer: while interpreter.num_dots() > 0 {
         let commands = interpreter.step().unwrap();

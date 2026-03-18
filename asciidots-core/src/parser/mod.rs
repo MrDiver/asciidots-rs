@@ -1,7 +1,9 @@
+mod ascii_cell;
 mod error;
 mod lexer;
-mod token;
+mod parser;
 
-pub use error::{LexError, LexErrors};
-pub use lexer::Lexer;
-pub use token::{MirrorKind, SpanToken, Spanned, Token};
+pub use ascii_cell::{AsciiCell, AsciiFunc, MirrorKind, SpanToken, Spanned};
+pub use error::{LexError, ParsingError, ParsingErrorCollection};
+pub use lexer::{AsciiToken, DotsSource, Lexer, PreambleStatement};
+pub use parser::{DotsModule, Parser};

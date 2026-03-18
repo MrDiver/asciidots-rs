@@ -52,7 +52,7 @@ fn main() -> miette::Result<()> {
         Commands::Run { path, tui } => {
             let content = std::fs::read_to_string(path).into_diagnostic()?;
             if tui {
-                asciidots_tui::run(&content);
+                asciidots_tui::run(&content)?;
             } else {
                 env_logger::init();
                 run(&content)?;
