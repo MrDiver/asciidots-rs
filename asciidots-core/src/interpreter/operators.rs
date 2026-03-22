@@ -107,15 +107,9 @@ impl OperatorQueues {
     }
 
     fn same_call(dot1: &DotMachine, dot2: &DotMachine) -> bool {
-        let call1 = dot1.dot().peek_callstack();
-        let call2 = dot2.dot().peek_callstack();
-        if let Some(site1) = call1
-            && let Some(site2) = call2
-        {
-            site1 == site2
-        } else {
-            call1.is_none() && call2.is_none()
-        }
+        let call1 = dot1.dot().callstack();
+        let call2 = dot2.dot().callstack();
+        call1 == call2
     }
 
     pub(super) fn get_result(&mut self) -> Option<DotMachine> {

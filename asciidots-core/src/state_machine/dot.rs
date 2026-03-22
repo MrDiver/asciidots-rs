@@ -9,7 +9,7 @@ pub enum ValueSelector {
 }
 
 #[derive(Debug, Clone)]
-struct CallStack {
+pub struct CallStack {
     last: Option<Position>,
     overflow: Vec<Position>,
 }
@@ -37,6 +37,18 @@ impl CallStack {
 
     fn peek(&self) -> Option<Position> {
         self.last
+    }
+}
+
+impl PartialEq for CallStack {
+    fn eq(&self, other: &Self) -> bool {
+        if let Some(site1) = self.last
+            && let Some(site2) = other.last
+        {
+            site1 == site2 && self.overflow == other.overflow
+        } else {
+            self.last.is_none() && other.last.is_none()
+        }
     }
 }
 
@@ -168,7 +180,7 @@ impl Dot {
         Ok(())
     }
 
-    pub fn peek_callstack(&self) -> Option<Position> {
-        self.callstack.peek()
+    pub fn callstack(&self) -> &CallStack {
+        &self.callstack
     }
 }
