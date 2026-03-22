@@ -1,13 +1,12 @@
-use log::warn;
 use nom::AsChar;
 use rustc_hash::FxHashSet;
 
 use crate::{
     interpreter::AsciiField,
     parser::{
-        AsciiCell, LexError, MirrorKind, ParsingError, ParsingErrorCollection, SpanToken, Spanned,
+        AsciiCell, MirrorKind, ParsingError, ParsingErrorCollection, SpanToken,
         ascii_cell::AsciiFunc,
-        lexer::{AsciiToken, DotsSource, PreambleStatement},
+        lexer::{DotsSource, PreambleStatement},
     },
     primitives::{Direction, Orientation, Position},
 };
@@ -53,16 +52,6 @@ impl Parser {
             grid.get(y)
                 .and_then(|line| line.get(x).map(|token| token.repr()))
         };
-        let find_position = |c: char, pos: (usize, usize)| -> Option<Position> {
-            for (y, line) in grid.iter().enumerate() {
-                for (x, token) in line.iter().enumerate() {
-                    if token.repr() == c && x != pos.0 && y != pos.1 {
-                        return Some((x as i32, y as i32).into());
-                    }
-                }
-            }
-            None
-        };
         let get_name = |x: usize, y: usize| {
             let mut i = x + 1;
             let mut c_opt = get_char(i, y);
@@ -70,6 +59,7 @@ impl Parser {
             while let Some(c) = c_opt
                 && !c.is_whitespace()
                 && !c.is_ascii_punctuation()
+                && !c.is_dec_digit()
             {
                 acc.push(c);
                 i += 1;
@@ -78,6 +68,7 @@ impl Parser {
             if acc.is_empty() { None } else { Some(acc) }
         };
 
+        let mut inside_comment = false;
         let mut inside_operator = false;
         let mut operator_orientation = Orientation::Horizontal;
         let mut op_length = 0;
@@ -85,6 +76,18 @@ impl Parser {
         for (y, line) in grid.iter().enumerate() {
             for (x, token) in line.iter().enumerate() {
                 let cell = match token.repr() {
+                    c if inside_comment => {
+                        if c == '`' {
+                            inside_comment = false;
+                            AsciiCell::Comment('`')
+                        } else {
+                            AsciiCell::Comment(c)
+                        }
+                    }
+                    '`' => {
+                        inside_comment = true;
+                        AsciiCell::Comment('`')
+                    }
                     '{' => {
                         inside_operator = true;
                         operator_orientation = Orientation::Horizontal;
@@ -98,14 +101,14 @@ impl Parser {
                     '}' => {
                         if !inside_operator {
                             diagnostics.push(ParsingError::MissingOpeningBrace {
-                                expected: '{',
-                                span: (token.span().offset() - 2, 1).into(),
+                                _expected: '{',
+                                _span: (token.span().offset() - 2, 1).into(),
                             });
                         }
                         if matches!(operator_orientation, Orientation::Vertical) {
                             diagnostics.push(ParsingError::MismatchingBrace {
                                 expected: ']',
-                                span: token.span(),
+                                _span: token.span(),
                             });
                         }
                         inside_operator = false;
@@ -113,16 +116,16 @@ impl Parser {
                     }
                     ']' => {
                         if !inside_operator {
-                            diagnostics.push(ParsingError::MissingOpeningBrace {
-                                expected: '[',
-                                span: (token.span().offset() - 2, 1).into(),
-                            });
+                            // diagnostics.push(ParsingError::MissingOpeningBrace {
+                            //     _expected: '[',
+                            //     _span: (token.span().offset() - 2, 1).into(),
+                            // });
                         }
                         if matches!(operator_orientation, Orientation::Horizontal) {
-                            diagnostics.push(ParsingError::MismatchingBrace {
-                                expected: '}',
-                                span: token.span(),
-                            });
+                            // diagnostics.push(ParsingError::MismatchingBrace {
+                            //     expected: '}',
+                            //     _span: token.span(),
+                            // });
                         }
                         inside_operator = false;
                         AsciiCell::OperatorEnd(Orientation::Vertical)
@@ -135,10 +138,10 @@ impl Parser {
                             } else {
                                 '}'
                             };
-                            diagnostics.push(ParsingError::MissingOpeningBrace {
-                                expected: brace,
-                                span: token.span(),
-                            })
+                            // diagnostics.push(ParsingError::MissingOpeningBrace {
+                            //     _expected: brace,
+                            //     _span: token.span(),
+                            // })
                         }
                         AsciiCell::Operator {
                             orientation: operator_orientation,
@@ -163,6 +166,7 @@ impl Parser {
                     '!' => AsciiCell::Negate,
                     '&' => AsciiCell::StopProgram,
                     '#' => AsciiCell::ValueMarker,
+                    '=' => AsciiCell::Assertion,
                     '@' => {
                         let name = get_name(x, y);
                         if let Some(name) = name {
@@ -176,7 +180,7 @@ impl Parser {
                         let name = get_name(x, y);
                         if name.is_none() {
                             diagnostics.push(ParsingError::MissingNameForCallOperator {
-                                span: token.span(),
+                                _span: token.span(),
                             });
                         }
                         AsciiCell::Call(name.expect("Should have a name"))
@@ -195,8 +199,8 @@ impl Parser {
                     c if c.is_alphabetic() => AsciiCell::Char(c),
                     c if c.is_whitespace() => {
                         diagnostics.push(ParsingError::InvalidWhitespace {
-                            c,
-                            span: token.span(),
+                            _c: c,
+                            _span: token.span(),
                         });
                         AsciiCell::Empty
                     }
@@ -231,8 +235,8 @@ impl Parser {
                     }
                 }
                 diagnostics.push(ParsingError::MissingDestinationForWarp {
-                    c: spanned.repr(),
-                    span: spanned.span(),
+                    _c: spanned.repr(),
+                    _span: spanned.span(),
                 })
             }
         }

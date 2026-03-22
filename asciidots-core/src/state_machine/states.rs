@@ -143,7 +143,7 @@ impl MachineStateExecutor for TravelState {
                 dot.step();
             }
             AsciiCell::Mirror(kind) => {
-                let Position { x, y } = (*dot.direction()).into();
+                let Position { x, y } = (dot.direction()).into();
                 let tmp = match kind {
                     MirrorKind::Forward => Position { x: -y, y: -x },
                     MirrorKind::Backward => Position { x: y, y: x },
@@ -162,16 +162,16 @@ impl MachineStateExecutor for TravelState {
             }
             AsciiCell::Duplicate => {
                 pending_dots.reserve(2);
-                let dot_snapshot = *dot;
-                for d in &[
+                let dot_snapshot = dot.clone();
+                for d in [
                     Direction::Up,
                     Direction::Down,
                     Direction::Left,
                     Direction::Right,
                 ] {
-                    if *d != *dot_snapshot.direction() && *d != dot_snapshot.direction().reverse() {
-                        let mut new_dot = dot_snapshot;
-                        new_dot.set_dir(*d).step();
+                    if d != dot_snapshot.direction() && d != dot_snapshot.direction().reverse() {
+                        let mut new_dot = dot_snapshot.clone();
+                        new_dot.set_dir(d).step();
                         pending_dots.push(DotMachine::from(new_dot));
                     }
                 }
@@ -189,9 +189,9 @@ impl MachineStateExecutor for TravelState {
             AsciiCell::Operator { .. } => {
                 return Ok(MachineEvent::HitOperator);
             }
-            AsciiCell::Conditional(_) if *dot.direction() == Direction::Down => {
-                return Ok(MachineEvent::Died);
-            }
+            // AsciiCell::Conditional(_) if dot.direction() == Direction::Down => {
+            //     return Ok(MachineEvent::Died);
+            // }
             AsciiCell::Conditional(_) => {
                 return Ok(MachineEvent::HitOperator);
             }
@@ -216,6 +216,18 @@ impl MachineStateExecutor for TravelState {
                     self.is_warping = true;
                 }
             }
+            AsciiCell::Call(name) => {
+                return Ok(MachineEvent::Call(dot.uuid(), name.clone()));
+            }
+            AsciiCell::DefRet(_) => {
+                dot.ret()
+                    .expect("For now don't handle returns when not inside a function");
+                dot.step();
+                return Ok(MachineEvent::Nothing);
+            }
+            AsciiCell::Comment(_) => {
+                dot.step();
+            }
             _ => return Ok(MachineEvent::Died),
         };
         Ok(MachineEvent::Nothing)
@@ -238,7 +250,11 @@ impl MachineStateExecutor for TravelState {
             | AsciiCell::Operator { .. }
             | AsciiCell::Filter(_)
             | AsciiCell::Conditional(_)
-            | AsciiCell::Warp { .. } => StateTransition::Stay,
+            | AsciiCell::Warp { .. } => {
+                dot.reset_selector();
+                StateTransition::Stay
+            }
+
             _ => StateTransition::Transition,
         }
     }
@@ -332,7 +348,8 @@ impl MachineStateExecutor for WaitingState {
                 dot.step();
             }
             _ => {
-                unreachable!("This should have never happened")
+                // unreachable!("This should have never happened")
+                dot.step();
             }
         };
         Ok(MachineEvent::Nothing)
@@ -392,10 +409,11 @@ impl MachineStateExecutor for PrintingState {
                 self.inside_quote = true;
             }
             c => {
-                return Err(RuntimeDiagnostic::invalid_printing_modifier(
-                    c.clone(),
-                    token.span(),
-                ));
+                dot.step();
+                // return Err(RuntimeDiagnostic::invalid_printing_modifier(
+                //     c.clone(),
+                //     token.span(),
+                // ));
             }
         };
         Ok(MachineEvent::Nothing)
@@ -408,9 +426,9 @@ impl MachineStateExecutor for PrintingState {
         } else {
             match token.inner() {
                 AsciiCell::ValueMarker
+                | AsciiCell::AddrMarker
                 | AsciiCell::Quote
                 | AsciiCell::QuoteStream
-                | AsciiCell::AddrMarker
                     if !self.got_modifier =>
                 {
                     self.got_modifier = true;

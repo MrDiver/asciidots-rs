@@ -8,4 +8,5 @@ pub enum MachineEvent {
     PrintLn(String),
     PrintChar(char),
     Input(u64),
+    Call(u64, String),
 }

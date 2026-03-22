@@ -61,6 +61,13 @@ impl Default for Position {
     }
 }
 
+impl PartialEq for Position {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+impl Eq for Position {}
+
 impl From<(i32, i32)> for Position {
     fn from(value: (i32, i32)) -> Self {
         Position::new(value.0, value.1)

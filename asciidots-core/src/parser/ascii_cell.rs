@@ -55,6 +55,7 @@ pub enum AsciiCell {
     Duplicate,                 // Standalone *
     Digit(u8),                 // Any digit 1-9
     Char(char),                // Any Char
+    Comment(char),
     Warp {
         repr: char,
         other: Position,
@@ -110,6 +111,7 @@ impl std::fmt::Display for AsciiCell {
             AsciiCell::Duplicate => write!(f, "*"),
             AsciiCell::Digit(d) => write!(f, "{}", d),
             AsciiCell::Char(c) => write!(f, "{}", c),
+            AsciiCell::Comment(c) => write!(f, "{}", c),
             AsciiCell::Assertion => write!(f, "="),
             AsciiCell::Warp { repr, .. } => write!(f, "{}", repr),
             AsciiCell::Call(_) => write!(f, "%"),
@@ -158,6 +160,7 @@ impl From<&AsciiCell> for char {
             AsciiCell::Duplicate => '*',
             AsciiCell::Digit(d) => char::from_digit(*d as u32, 10).unwrap_or('0'),
             AsciiCell::Char(c) => *c,
+            AsciiCell::Comment(c) => *c,
             AsciiCell::Assertion => '=',
             AsciiCell::Warp { repr, .. } => *repr,
             AsciiCell::Call(_) => '%',

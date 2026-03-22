@@ -1,8 +1,46 @@
+use std::ops::{BitOr, BitOrAssign, Not};
+
 use asciidots_core::interpreter::DotsInterpreter;
 
 #[allow(unused)]
 pub type DotPos = (i32, i32);
 pub type DotValueAtPos = (i32, i32, f64);
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum Status {
+    Success,
+    Failure,
+}
+
+impl Not for Status {
+    type Output = Status;
+
+    fn not(self) -> Self::Output {
+        match self {
+            Status::Success => Status::Failure,
+            Status::Failure => Status::Success,
+        }
+    }
+}
+
+impl BitOr for Status {
+    type Output = Status;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Status::Success, Status::Success) => Status::Success,
+            (Status::Success, Status::Failure) => Status::Success,
+            (Status::Failure, Status::Success) => Status::Success,
+            (Status::Failure, Status::Failure) => Status::Failure,
+        }
+    }
+}
+
+impl BitOrAssign for Status {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
+    }
+}
 
 #[allow(unused)]
 fn sorted_positions(interpreter: &DotsInterpreter) -> Vec<DotPos> {
@@ -31,17 +69,24 @@ fn sorted_position_values(interpreter: &DotsInterpreter) -> Vec<DotValueAtPos> {
     values
 }
 
-fn step_n(interpreter: &mut DotsInterpreter, n: usize) {
+fn step_n(interpreter: &mut DotsInterpreter, n: usize) -> Status {
+    let mut status = Status::Success;
     for _ in 0..n {
-        interpreter
+        status |= interpreter
             .step()
-            .expect("interpreter step should not produce runtime errors");
+            .map(|_| Status::Success)
+            .unwrap_or(Status::Failure);
+        if matches!(status, Status::Failure) {
+            break;
+        }
     }
+    status
 }
 
 #[allow(unused)]
 pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
-    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
+    let mut interpreter =
+        DotsInterpreter::from_string(program).expect("program should lex and initialize");
 
     for (tick, expected_positions) in expected.iter().enumerate() {
         let got = sorted_positions(&interpreter);
@@ -57,7 +102,8 @@ pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
 }
 
 pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
-    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
+    let mut interpreter =
+        DotsInterpreter::from_string(program).expect("program should lex and initialize");
 
     for (tick, expected_values) in expected.iter().enumerate() {
         let got = sorted_position_values(&interpreter);
@@ -88,22 +134,50 @@ pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
     }
 }
 
-fn ticks_until_halt(program: &str, max_ticks: usize) -> usize {
-    let mut interpreter = DotsInterpreter::new(program).expect("program should lex and initialize");
+fn ticks_until_halt(program: &str, max_ticks: usize) -> (usize, Status) {
+    let mut interpreter =
+        DotsInterpreter::from_string(program).expect("program should lex and initialize");
     let mut ticks = 0usize;
+    let mut status = Status::Success;
     while interpreter.num_dots() > 0 {
         assert!(
             ticks < max_ticks,
             "program did not halt within {max_ticks} ticks"
         );
-        step_n(&mut interpreter, 1);
+        status |= step_n(&mut interpreter, 1);
         ticks += 1;
     }
-    ticks
+    (ticks, status)
 }
 
 pub fn assert_ticks_to_halt(program: &str, expected_ticks: usize, max_ticks: usize) {
-    let got_ticks = ticks_until_halt(program, max_ticks);
+    let (got_ticks, _status) = ticks_until_halt(program, max_ticks);
+    assert_eq!(
+        got_ticks, expected_ticks,
+        "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"
+    );
+}
+
+pub fn assert_success_with_ticks(program: &str, expected_ticks: usize, max_ticks: usize) {
+    let (got_ticks, status) = ticks_until_halt(program, max_ticks);
+    assert_eq!(
+        status,
+        Status::Success,
+        "Expected program to succeed but it failed"
+    );
+    assert_eq!(
+        got_ticks, expected_ticks,
+        "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"
+    );
+}
+
+pub fn assert_failure_with_ticks(program: &str, expected_ticks: usize, max_ticks: usize) {
+    let (got_ticks, status) = ticks_until_halt(program, max_ticks);
+    assert_eq!(
+        status,
+        Status::Failure,
+        "Expected program to fail but it succeeeded"
+    );
     assert_eq!(
         got_ticks, expected_ticks,
         "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"

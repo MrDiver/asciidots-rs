@@ -1,5 +1,3 @@
-use std::slice::Iter;
-
 use miette::SourceSpan;
 
 use crate::{

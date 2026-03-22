@@ -5,10 +5,10 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_till},
     character::{
-        complete::{alpha1, anychar, char, line_ending, not_line_ending, space0, space1},
+        complete::{alpha1, anychar, line_ending, space0, space1},
         streaming::alphanumeric1,
     },
-    combinator::{opt, verify},
+    combinator::opt,
     multi::{many0, many1, separated_list1},
     sequence::{preceded, terminated},
 };
@@ -163,7 +163,7 @@ impl<'a> Lexer<'a> {
                     let span = into_span(e.input);
                     Err(LexError::LexingFailure {
                         span,
-                        help: format!(
+                        _help: format!(
                             "unexpected '{}' at line {}, column {}",
                             e.input.fragment().chars().next().unwrap_or('?'),
                             e.input.location_line(),

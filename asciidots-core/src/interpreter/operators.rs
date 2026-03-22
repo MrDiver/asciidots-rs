@@ -34,6 +34,27 @@ impl DotQueue {
     fn is_empty(&self) -> bool {
         self.first.is_none()
     }
+
+    fn peek(&self) -> &Option<DotMachine> {
+        &self.first
+    }
+
+    pub fn remove_matching(&mut self, pred: impl Fn(&DotMachine) -> bool) -> Option<DotMachine> {
+        if let Some(ref dot) = self.first {
+            if pred(dot) {
+                let dot = self.first.take().unwrap();
+                self.first = self.overflow.pop_front();
+                return Some(dot);
+            }
+        }
+
+        let idx = self.overflow.iter().position(|d| pred(d))?;
+        self.overflow.remove(idx)
+    }
+
+    pub fn has_matching(&self, pred: impl Fn(&DotMachine) -> bool) -> bool {
+        self.first.as_ref().map_or(false, |d| pred(d)) || self.overflow.iter().any(pred)
+    }
 }
 
 #[derive(Debug)]
@@ -43,6 +64,7 @@ pub struct OperatorQueues {
     negated: bool,
     horizontal: DotQueue,
     vertical: DotQueue,
+    last_push: Orientation,
 }
 
 impl OperatorQueues {
@@ -53,35 +75,60 @@ impl OperatorQueues {
             negated,
             horizontal: DotQueue::default(),
             vertical: DotQueue::default(),
+            last_push: Orientation::Vertical,
         }
     }
 
     pub(super) fn push(&mut self, dot: DotMachine) {
-        match dot.direction().orientation() {
+        let orient = dot.direction().orientation();
+        match orient {
             Orientation::Horizontal => self.horizontal.push(dot),
             Orientation::Vertical => self.vertical.push(dot),
+        }
+        self.last_push = orient;
+    }
+
+    fn try_fire(&mut self) -> Option<(DotMachine, DotMachine)> {
+        let (peek_queue, search_queue) = match self.last_push {
+            Orientation::Horizontal => (&mut self.horizontal, &mut self.vertical),
+            Orientation::Vertical => (&mut self.vertical, &mut self.horizontal),
+        };
+        if let Some(first) = peek_queue.peek() {
+            let other = search_queue.remove_matching(|other| Self::same_call(&first, other))?;
+            let first = peek_queue.pop_front().expect("Already peeked before");
+            if first.direction().orientation() == self.orientation {
+                Some((first, other))
+            } else {
+                Some((other, first))
+            }
+        } else {
+            None
+        }
+    }
+
+    fn same_call(dot1: &DotMachine, dot2: &DotMachine) -> bool {
+        let call1 = dot1.dot().peek_callstack();
+        let call2 = dot2.dot().peek_callstack();
+        if let Some(site1) = call1
+            && let Some(site2) = call2
+        {
+            site1 == site2
+        } else {
+            call1.is_none() && call2.is_none()
         }
     }
 
     pub(super) fn get_result(&mut self) -> Option<DotMachine> {
         if !self.horizontal.is_empty() && !self.vertical.is_empty() {
-            let (mut primary, secondary) = {
-                let doth = self.horizontal.pop_front().unwrap();
-                let dotv = self.vertical.pop_front().unwrap();
-                if matches!(self.orientation, Orientation::Horizontal) {
-                    (doth, dotv)
-                } else {
-                    (dotv, doth)
-                }
-            };
+            let (mut primary, secondary) = self.try_fire()?;
 
             if self.op == '~' {
-                let mut new_dot = primary.dot();
+                let mut new_dot = primary.dot().clone();
                 let condition = {
                     let tmp = secondary.dot().selected() as u64 == 0;
                     if self.negated { !tmp } else { tmp }
                 };
-                if condition {
+                if !condition {
                     new_dot.set_dir(Direction::Up);
                 }
                 new_dot.reset_selector();
@@ -145,7 +192,7 @@ impl OperatorQueues {
                 'x' => (a as u64 ^ b as u64) as f64,
                 _ => a,
             };
-            let mut new_dot = primary.dot();
+            let mut new_dot = primary.dot().clone();
             new_dot.set_selected(new_val);
             primary.replace_dot(new_dot);
             return Some(primary);

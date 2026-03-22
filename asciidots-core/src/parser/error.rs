@@ -3,20 +3,20 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Diagnostic)]
 pub enum LexError {
-    #[error("parse error: {help}")]
+    #[error("parse error: {}", _help)]
     #[diagnostic(code(asciidots::lex::parse_error))]
     LexingFailure {
-        help: String,
+        _help: String,
         #[label("here")]
         span: SourceSpan,
     },
 
     #[error("unexpected input")]
-    #[diagnostic(code(asciidots::lex::unexpected_input), help("{help}"))]
+    #[diagnostic(code(asciidots::lex::unexpected_input), help("{}", _help))]
     UnexpectedInput {
-        help: String,
+        _help: String,
         #[label("here")]
-        span: SourceSpan,
+        _span: SourceSpan,
     },
 
     #[error("unexpected end of file")]
@@ -39,22 +39,25 @@ pub enum ParsingError {
     #[error("parse error: missing brace")]
     #[diagnostic(
         code(asciidots::parse::missing_brace),
-        help("Try adding a '{expected}'")
+        help("Try adding a '{}'", _expected)
     )]
     MissingOpeningBrace {
-        expected: char,
+        _expected: char,
         #[label("here")]
-        span: SourceSpan,
+        _span: SourceSpan,
     },
-    #[error("parse error: invalid whitespace character {c}, only use spaces not tabs")]
+    #[error(
+        "parse error: invalid whitespace character {}, only use spaces not tabs",
+        _c
+    )]
     #[diagnostic(
         code(asciidots::parse::invalid_whitespace),
         help("Try removing this whitespace and replacing with space")
     )]
     InvalidWhitespace {
-        c: char,
+        _c: char,
         #[label("here")]
-        span: SourceSpan,
+        _span: SourceSpan,
     },
     #[error("parse error: a function call operator shall always be called with a name")]
     #[diagnostic(
@@ -63,7 +66,7 @@ pub enum ParsingError {
     )]
     MissingNameForCallOperator {
         #[label("missing name")]
-        span: miette::SourceSpan,
+        _span: miette::SourceSpan,
     },
     #[error("parse error: You can not mix braces for operators, even if that would be cool :D")]
     #[diagnostic(
@@ -74,19 +77,19 @@ pub enum ParsingError {
         expected: char,
 
         #[label("mismatching brace expected '{expected}'")]
-        span: miette::SourceSpan,
+        _span: miette::SourceSpan,
     },
     #[error(
         "parse error: Missing destination for Warp, always have two warps in order for them to work"
     )]
     #[diagnostic(
         code(asciidots::parse::missing_destination),
-        help("Try adding another warp, by adding '{c}' somewhere on the map")
+        help("Try adding another warp, by adding '{}' somewhere on the map", _c)
     )]
     MissingDestinationForWarp {
-        c: char,
+        _c: char,
         #[label("Sink here")]
-        span: miette::SourceSpan,
+        _span: miette::SourceSpan,
     },
 }
 

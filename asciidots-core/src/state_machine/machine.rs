@@ -42,8 +42,8 @@ impl DotMachine {
         &self.dot.position()
     }
 
-    pub fn direction(&self) -> &Direction {
-        &self.dot.direction()
+    pub fn direction(&self) -> Direction {
+        self.dot.direction()
     }
 
     pub fn selected(&self) -> f64 {
@@ -58,8 +58,12 @@ impl DotMachine {
         self.state.short_name()
     }
 
-    pub fn dot(&self) -> Dot {
-        self.dot
+    pub fn dot(&self) -> &Dot {
+        &self.dot
+    }
+
+    pub fn dot_mut(&mut self) -> &mut Dot {
+        &mut self.dot
     }
 
     pub fn state_mut(&mut self) -> &mut MachineState {
@@ -104,6 +108,7 @@ impl DotMachine {
             MachineEvent::Nothing
             | MachineEvent::PrintLn(_)
             | MachineEvent::PrintChar(_)
+            | MachineEvent::Call(_, _)
             | MachineEvent::Input(_) => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Set(s) => s.next(&mut self.dot, lookahead),
@@ -124,17 +129,7 @@ impl DotMachine {
                 AsciiCell::AddrMarker => MachineState::set(ValueSelector::Addr),
                 AsciiCell::Write => MachineState::printing(),
                 AsciiCell::Assertion => MachineState::asserting(),
-                AsciiCell::Pipe(_)
-                | AsciiCell::CrossPipe
-                | AsciiCell::Duplicate
-                | AsciiCell::Mirror(_)
-                | AsciiCell::ForceDirection(_)
-                | AsciiCell::Conditional(_)
-                | AsciiCell::OperatorBegin(_)
-                | AsciiCell::OperatorEnd(_)
-                | AsciiCell::Filter(_)
-                | AsciiCell::Operator { .. } => MachineState::travel(),
-                _ => return,
+                _ => MachineState::travel(),
             }
         }
     }

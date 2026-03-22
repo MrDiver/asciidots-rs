@@ -1,8 +1,11 @@
-import math::sin as sin
-import !list as !list1
 
-.-#4-%sin--="-0.75"--
+   .-#11--%add--="23"-
+.----#12--/
 
-@sin--`some magic`--%return
+.----#1---%add--="3"-
+   .-#2---/
 
-.--
+
+ /----\
+/@add{+}\
+\-------/

@@ -21,11 +21,12 @@ pub enum InterpreterResult {
 pub enum InterpreterCommand {
     InputAnswer(u64, f64),
 }
+type FunDefMap = FxHashMap<String, Position>;
 
 #[derive(Debug)]
 pub struct DotsInterpreter {
     field: AsciiField,
-    functions: FxHashMap<String, Position>,
+    functions: FunDefMap,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<RuntimeDiagnostic>,
@@ -124,7 +125,6 @@ impl DotsInterpreter {
                 }
                 MachineEvent::HitOperator => {
                     let mut dot = self.dots.swap_remove(i);
-                    let pos = dot.position();
                     dot.next(&event, &default_token);
                     let opqueue = self
                         .operator_map
@@ -158,6 +158,23 @@ impl DotsInterpreter {
                         self.field.at_spanned(dot.position()).span(),
                     ))
                 }
+                MachineEvent::Call(_, name) => {
+                    // TODO: Implement Native function calls via Lua extensions
+                    let fun = self.functions.get(&name);
+                    if let Some(fun) = fun {
+                        let pos: Position = (fun.x, fun.y).into();
+                        let current = self.field.at_spanned(&pos);
+                        dot.dot_mut().call(pos).step();
+                        dot.next(&MachineEvent::Nothing, current)
+                    } else {
+                        let current = self.field.at_spanned(dot.position());
+                        self.diagnostics
+                            .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                name,
+                                span: current.span(),
+                            });
+                    }
+                }
                 _ => {
                     let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&event, &lookahead)
@@ -171,11 +188,11 @@ impl DotsInterpreter {
         }
     }
 
-    pub(crate) fn cleanup_dead_dots(dots: &mut Vec<DotMachine>) {
+    pub fn cleanup_dead_dots(&mut self) {
         let mut i = 0;
-        while i < dots.len() {
-            if dots[i].is_dead() {
-                dots.swap_remove(i);
+        while i < self.dots.len() {
+            if self.dots[i].is_dead() {
+                self.dots.swap_remove(i);
             } else {
                 i += 1;
             }
@@ -199,8 +216,8 @@ impl DotsInterpreter {
         trace!("--- Step ---");
         self.results.clear();
         self.interpret();
-        Self::cleanup_dead_dots(&mut self.dots);
-        self.dots.append(&mut self.pending_dots);
+        self.cleanup_dead_dots();
+        self.handle_pending();
 
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
@@ -220,5 +237,14 @@ impl DotsInterpreter {
 
     pub fn queues(&self) -> &FxHashMap<(usize, usize), OperatorQueues> {
         &self.operator_map
+    }
+
+    fn handle_pending(&mut self) {
+        for dot in &mut self.pending_dots {
+            let pos = dot.position();
+            let tok = self.field.at_spanned(pos);
+            dot.next(&MachineEvent::Nothing, tok);
+        }
+        self.dots.append(&mut self.pending_dots);
     }
 }

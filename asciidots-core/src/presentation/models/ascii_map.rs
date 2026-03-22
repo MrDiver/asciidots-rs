@@ -53,13 +53,16 @@ impl GridModel for AsciiMapModel<'_> {
                     GridCellKind::OperatorDelimiter
                 }
                 AsciiCell::Operator { .. } => GridCellKind::Operator,
-                AsciiCell::Digit(_) => GridCellKind::ActiveOperator,
-                AsciiCell::Char(_) => GridCellKind::ActiveOperator,
+                AsciiCell::Digit(_) => GridCellKind::Quote,
+                AsciiCell::Char(_) => GridCellKind::Quote,
                 AsciiCell::Duplicate => GridCellKind::Command,
                 AsciiCell::Conditional(_) => GridCellKind::Command,
                 AsciiCell::ValueMarker => GridCellKind::Command,
                 AsciiCell::Write => GridCellKind::Command,
                 AsciiCell::Read => GridCellKind::Command,
+                AsciiCell::Call(_) | AsciiCell::DefRet(_) | AsciiCell::Warp { .. } => {
+                    GridCellKind::ActiveOperator
+                }
                 _ => GridCellKind::Default,
             }
         };

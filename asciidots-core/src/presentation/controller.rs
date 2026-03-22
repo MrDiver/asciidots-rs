@@ -37,7 +37,7 @@ impl RuntimeController {
     const MIN_TICK_MS: u64 = 0;
     const MAX_TICK_MS: u64 = 5_000;
     const MIN_STEPS_PER_FRAME: usize = 1;
-    const MAX_STEPS_PER_FRAME: usize = 10_000;
+    const MAX_STEPS_PER_FRAME: usize = 100_000_000;
 
     pub fn new(content: &str) -> miette::Result<Self> {
         let interpreter = DotsInterpreter::from_string(content)?;

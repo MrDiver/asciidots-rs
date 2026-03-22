@@ -38,6 +38,12 @@ pub enum RuntimeDiagnostic {
         #[label("This is not a valid float")]
         span: SourceSpan,
     },
+    #[error("The function '{}' is not defined", name)]
+    MissingFunctionDefinition {
+        name: String,
+        #[label("Missing function definition")]
+        span: SourceSpan,
+    },
 }
 
 impl RuntimeDiagnostic {

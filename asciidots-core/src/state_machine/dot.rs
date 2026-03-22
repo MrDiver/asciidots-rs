@@ -8,7 +8,39 @@ pub enum ValueSelector {
     Value,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+struct CallStack {
+    last: Option<Position>,
+    overflow: Vec<Position>,
+}
+
+impl CallStack {
+    fn new() -> Self {
+        Self {
+            last: None,
+            overflow: Vec::default(),
+        }
+    }
+
+    fn push(&mut self, pos: Position) {
+        if let Some(last_pos) = self.last {
+            self.overflow.push(last_pos);
+        }
+        self.last = Some(pos);
+    }
+
+    fn pop(&mut self) -> Option<Position> {
+        let last_pos = self.last;
+        self.last = self.overflow.pop();
+        last_pos
+    }
+
+    fn peek(&self) -> Option<Position> {
+        self.last
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Dot {
     direction: Direction,
     position: Position,
@@ -16,6 +48,7 @@ pub struct Dot {
     addr: f64,
     uuid: u64,
     selector: ValueSelector,
+    callstack: CallStack,
 }
 
 thread_local! {
@@ -39,6 +72,7 @@ impl Dot {
             value,
             addr: 0.0,
             selector: ValueSelector::Value,
+            callstack: CallStack::new(),
         }
     }
 
@@ -98,8 +132,8 @@ impl Dot {
         self.uuid
     }
 
-    pub fn direction(&self) -> &Direction {
-        &self.direction
+    pub fn direction(&self) -> Direction {
+        self.direction
     }
 
     pub fn addr(&self) -> f64 {
@@ -121,5 +155,20 @@ impl Dot {
     pub fn set_position(&mut self, other: Position) -> &mut Self {
         self.position = other;
         self
+    }
+
+    pub fn call(&mut self, new_pos: Position) -> &mut Self {
+        self.callstack.push(self.position);
+        self.position = new_pos;
+        self
+    }
+
+    pub fn ret(&mut self) -> Result<(), ()> {
+        self.position = self.callstack.pop().ok_or(())?;
+        Ok(())
+    }
+
+    pub fn peek_callstack(&self) -> Option<Position> {
+        self.callstack.peek()
     }
 }

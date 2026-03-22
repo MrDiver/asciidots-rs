@@ -1,5 +1,5 @@
 use asciidots_core::interpreter::{AsciiField, DotsInterpreter};
-use asciidots_core::parser::AsciiCell;
+use asciidots_core::parser::{AsciiCell, Parser};
 use asciidots_core::parser::{Lexer, SpanToken};
 use asciidots_core::primitives::{Direction, Position};
 use asciidots_core::state_machine::{Dot, DotMachine};
@@ -16,10 +16,9 @@ const SUPERBIG: &str = include_str!("../samples/superbig.dots");
 const DEATHFACTORY: &str = include_str!("../samples/deathfactory.dots");
 
 fn lex_source(source: &str) {
-    let mut lexer = Lexer::new(source);
-    lexer.run();
+    let lexer = Lexer::new(source);
     let tokens = lexer
-        .finish()
+        .run()
         .expect("lexing should succeed for benchmark input");
     black_box(tokens);
 }
@@ -54,9 +53,8 @@ fn bench_parsing(c: &mut Criterion) {
         let src = *src;
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let parsed = AsciiField::new(black_box(src))
-                    .expect("parsing should succeed for benchmark input");
-                black_box(parsed);
+                let source = Lexer::new(src).run().expect("Should work");
+                let _parsed = Parser::new(source).run().expect("Should parse fine");
             })
         });
     }
@@ -81,7 +79,8 @@ fn bench_single_dot_interpret(c: &mut Criterion) {
 }
 
 fn make_initialized_program(source: &str) -> DotsInterpreter {
-    DotsInterpreter::new(source).expect("program parsing should succeed for benchmark input")
+    DotsInterpreter::from_string(source)
+        .expect("program parsing should succeed for benchmark input")
 }
 
 /// Step N times without checking for termination.
