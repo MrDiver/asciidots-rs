@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use asciidots_core::interpreter::InterpreterResult;
 use asciidots_core::presentation::{
@@ -11,7 +11,7 @@ use miette::NamedSource;
 use ratatui::widgets::Paragraph;
 use ratatui::{
     DefaultTerminal,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     widgets::{
         Block, Borders, Cell, Clear, List, ListItem, Row, Scrollbar, ScrollbarOrientation,
@@ -673,6 +673,31 @@ impl DotsView for RatatuiView {
 pub fn run(content: &str) -> miette::Result<()> {
     let mut app = RuntimeController::new(content)
         .or_else(|e| Err(e.with_source_code(NamedSource::new("Source", content.to_string()))))?;
+    let mut view = RatatuiView::new();
+    loop {
+        let command = view.poll_command();
+        if let Some(c) = command {
+            if matches!(c, AppCommand::StopProgram) {
+                break;
+            }
+            if matches!(c, AppCommand::Reset) {
+                view.clear_output();
+            }
+            let results = app.handle_command(c);
+            view.process_results(&results);
+        }
+        if matches!(view.mode, ViewMode::Normal) {
+            let results = app.tick();
+            view.process_results(&results);
+        }
+        view.render(&app)
+    }
+    Ok(())
+}
+
+pub fn run_file(path: impl AsRef<Path>) -> miette::Result<()> {
+    let path_ref = path.as_ref();
+    let mut app = RuntimeController::new_from_file(path_ref)?;
     let mut view = RatatuiView::new();
     loop {
         let command = view.poll_command();

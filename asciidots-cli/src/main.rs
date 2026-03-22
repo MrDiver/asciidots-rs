@@ -1,4 +1,4 @@
-use asciidots_cli::{check, run};
+use asciidots_cli::{check_file, run_file};
 use clap::{
     Parser, Subcommand,
     builder::{
@@ -6,7 +6,6 @@ use clap::{
         styling::{AnsiColor, Effects},
     },
 };
-use miette::IntoDiagnostic;
 
 fn styles() -> Styles {
     Styles::styled()
@@ -45,17 +44,15 @@ fn main() -> miette::Result<()> {
 
     match cli.command {
         Commands::Check { path } => {
-            let content = std::fs::read_to_string(path).into_diagnostic()?;
-            check(&content)?;
+            check_file(&path)?;
             println!("No errors found");
         }
         Commands::Run { path, tui } => {
-            let content = std::fs::read_to_string(path).into_diagnostic()?;
             if tui {
-                asciidots_tui::run(&content)?;
+                asciidots_tui::run_file(&path)?;
             } else {
                 env_logger::init();
-                run(&content)?;
+                run_file(&path)?;
             }
         }
         _ => todo!(),

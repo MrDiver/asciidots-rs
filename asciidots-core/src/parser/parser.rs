@@ -17,6 +17,10 @@ pub struct DotsModule {
 }
 
 impl DotsModule {
+    pub fn new(field: AsciiField, functions: Vec<AsciiFunc>) -> Self {
+        Self { field, functions }
+    }
+
     pub fn unpack(self) -> (AsciiField, Vec<AsciiFunc>) {
         (self.field, self.functions)
     }

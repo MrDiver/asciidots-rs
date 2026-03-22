@@ -3,7 +3,7 @@ use miette::SourceSpan;
 use nom::{
     AsChar, IResult, Parser,
     branch::alt,
-    bytes::complete::{tag, take_till},
+    bytes::complete::{tag, take_till, take_while1},
     character::{
         complete::{alpha1, anychar, line_ending, space0, space1},
         streaming::alphanumeric1,
@@ -78,7 +78,7 @@ fn import_alias_parser(i: Span) -> IResult<Span, String> {
 fn import_parser(i: Span) -> IResult<Span, PreambleStatement> {
     let (i, _) = tag("import")(i)?;
     let (i, _) = space1(i)?;
-    let (i, name) = alphanumeric1(i)?;
+    let (i, name) = take_while1(|c: char| !c.is_whitespace())(i)?;
     let (i, alias) = opt(preceded(space1, import_alias_parser)).parse(i)?;
     Ok((
         i,

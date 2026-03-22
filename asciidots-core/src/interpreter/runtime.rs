@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use log::trace;
 use rustc_hash::FxHashMap;
 
 use crate::{
+    linker,
     parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
@@ -35,13 +38,12 @@ pub struct DotsInterpreter {
 }
 
 impl DotsInterpreter {
-    pub fn from_string(source: &str) -> miette::Result<Self> {
-        let lex = Lexer::new(source);
-        let source = lex.run()?;
-        let parser = Parser::new(source);
-        let module = parser.run();
-        Ok(Self::new(module?))
+
+    pub fn from_file(path: impl AsRef<Path>) -> miette::Result<Self> {
+        let module = linker::link_file(path.as_ref())?;
+        Ok(Self::new(module))
     }
+
     pub fn new(module: DotsModule) -> Self {
         let (field, functions) = module.unpack();
         let mut state = DotsInterpreter {

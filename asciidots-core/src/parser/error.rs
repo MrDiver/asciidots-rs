@@ -1,7 +1,7 @@
-use miette::{Diagnostic, SourceSpan};
+use miette::{Diagnostic, Report, SourceSpan};
 use thiserror::Error;
 
-#[derive(Error, Debug, Diagnostic)]
+#[derive(Error, Debug, Diagnostic, Clone)]
 pub enum LexError {
     #[error("parse error: {}", _help)]
     #[diagnostic(code(asciidots::lex::parse_error))]
@@ -34,7 +34,7 @@ pub enum LexError {
     },
 }
 
-#[derive(Error, Debug, Diagnostic)]
+#[derive(Error, Debug, Diagnostic, Clone)]
 pub enum ParsingError {
     #[error("parse error: missing brace")]
     #[diagnostic(
@@ -93,7 +93,7 @@ pub enum ParsingError {
     },
 }
 
-#[derive(Error, Debug, Diagnostic)]
+#[derive(Error, Debug, Diagnostic, Clone)]
 #[error("Parsing Failures")]
 pub struct ParsingErrorCollection {
     #[related]
@@ -103,5 +103,36 @@ pub struct ParsingErrorCollection {
 impl ParsingErrorCollection {
     pub fn new(errors: Vec<ParsingError>) -> Self {
         Self { errors }
+    }
+
+    pub fn errors(&self) -> &[ParsingError] {
+        &self.errors
+    }
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("Linking Failures")]
+pub struct LinkingErrorCollection {
+    #[related]
+    errors: Vec<Report>,
+}
+
+impl LinkingErrorCollection {
+    pub fn new() -> Self {
+        Self { errors: Vec::new() }
+    }
+
+    pub fn from_report(report: impl Into<Report>) -> Self {
+        Self {
+            errors: vec![report.into()],
+        }
+    }
+
+    pub fn push_error(&mut self, report: Report) {
+        self.errors.push(report);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
     }
 }

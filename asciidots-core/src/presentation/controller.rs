@@ -1,11 +1,10 @@
 use std::{
-    thread,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use crate::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
-    parser::{LexError, Lexer},
 };
 
 use super::models::{AsciiMapModel, DotDebugTableModel, SettingsTableModel};
@@ -25,6 +24,7 @@ pub enum AppCommand {
 pub struct RuntimeController {
     interpreter: DotsInterpreter,
     source: String,
+    source_file: Option<PathBuf>,
     tick_speed: Duration,
     steps_per_frame: usize,
     tick_count: usize,
@@ -44,6 +44,23 @@ impl RuntimeController {
         Ok(Self {
             interpreter,
             source: content.to_string(),
+            source_file: None,
+            tick_speed: Duration::from_millis(100),
+            steps_per_frame: 1,
+            tick_count: 0,
+            last_step_duration: Duration::ZERO,
+            running: false,
+            clock: Instant::now(),
+        })
+    }
+
+    pub fn new_from_file(path: impl AsRef<Path>) -> miette::Result<Self> {
+        let path_buf = path.as_ref().to_path_buf();
+        let interpreter = DotsInterpreter::from_file(&path_buf)?;
+        Ok(Self {
+            interpreter,
+            source: String::new(),
+            source_file: Some(path_buf),
             tick_speed: Duration::from_millis(100),
             steps_per_frame: 1,
             tick_count: 0,
@@ -54,7 +71,13 @@ impl RuntimeController {
     }
 
     pub fn reset(&mut self) {
-        if let Ok(interpreter) = DotsInterpreter::from_string(&self.source) {
+        let rebuilt = if let Some(path) = &self.source_file {
+            DotsInterpreter::from_file(path)
+        } else {
+            DotsInterpreter::from_string(&self.source)
+        };
+
+        if let Ok(interpreter) = rebuilt {
             self.interpreter = interpreter;
             self.tick_count = 0;
             self.last_step_duration = Duration::ZERO;

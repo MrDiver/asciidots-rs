@@ -40,7 +40,8 @@ pub enum Orientation {
     Vertical,
 }
 
-#[derive(Debug, Clone, Copy, Hash)]
+#[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -52,14 +53,6 @@ impl Position {
     }
 }
 
-impl Default for Position {
-    fn default() -> Self {
-        Self {
-            x: Default::default(),
-            y: Default::default(),
-        }
-    }
-}
 
 impl PartialEq for Position {
     fn eq(&self, other: &Self) -> bool {

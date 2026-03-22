@@ -1,0 +1,7 @@
+import libs/fac.dots
+import libs/add.dots
+
+.----#1---%add--="3"-
+   .-#2---/
+   
+.-#4--%fac--="24"

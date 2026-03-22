@@ -2,9 +2,9 @@ use std::io::{self, Write};
 
 use asciidots_core::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
-    parser::{LexError, Lexer},
+    parser::{LexError},
 };
-use miette::{Diagnostic, IntoDiagnostic, NamedSource, SourceCode};
+use miette::{Diagnostic, IntoDiagnostic};
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -14,19 +14,13 @@ pub struct LexDiagnostics {
     diagnostics: Vec<LexError>,
 }
 
-pub fn check(content: &str) -> miette::Result<()> {
-    let lexer: Lexer = Lexer::new(content);
-
-    match lexer.run() {
-        Ok(_) => Ok(()),
-        // TODO: Make better error wrapper
-        Err(e) => Err(e),
-    }
+pub fn check_file(path: &str) -> miette::Result<()> {
+    DotsInterpreter::from_file(path)?;
+    Ok(())
 }
 
-pub fn run(content: &str) -> miette::Result<()> {
-    let mut interpreter = DotsInterpreter::from_string(content)
-        .or_else(|e| Err(e.with_source_code(NamedSource::new("Source", content.to_string()))))?;
+pub fn run_file(path: &str) -> miette::Result<()> {
+    let mut interpreter = DotsInterpreter::from_file(path)?;
 
     'outer: while interpreter.num_dots() > 0 {
         let commands = interpreter.step().unwrap();
