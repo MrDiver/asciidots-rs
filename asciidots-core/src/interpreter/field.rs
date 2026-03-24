@@ -38,6 +38,10 @@ impl AsciiField {
         &self.field
     }
 
+    pub fn into_tokens(self) -> TokenField {
+        self.field
+    }
+
     /// Returns the token at `(x, y)`, or [`Token::Empty`] for out-of-bounds.
     ///
     /// Uses a single `y * width + x` index into the flat backing array for

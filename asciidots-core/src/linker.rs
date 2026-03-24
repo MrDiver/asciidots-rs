@@ -94,7 +94,7 @@ fn load_recursive(
         Ok(source) => source,
         Err(error) => {
             if let Some(lex_error) = error.downcast_ref::<LexError>() {
-                let report = miette::Report::new(lex_error.clone()).with_source_code(
+                let report = miette::Report::from(lex_error.clone()).with_source_code(
                     NamedSource::new(current_path.display().to_string(), source_text.clone()),
                 );
                 collected_errors.push_error(report);
@@ -107,13 +107,9 @@ fn load_recursive(
         }
     };
 
-    let import_paths: Vec<String> = iter_import_paths(&dots_source)
-        .map(ToString::to_string)
-        .collect();
-
     let module_directory = current_path.parent().unwrap_or_else(|| Path::new("."));
-    for import_path in import_paths {
-        let import_target = match resolve_import(module_directory, &import_path) {
+    for import_path in iter_import_paths(&dots_source) {
+        let import_target = match resolve_import(module_directory, import_path) {
             Ok(target) => target,
             Err(error) => {
                 active_stack.pop();
@@ -134,7 +130,7 @@ fn load_recursive(
         Ok(module) => module,
         Err(error) => {
             if let Some(parsing_errors) = error.downcast_ref::<ParsingErrorCollection>() {
-                let report = miette::Report::new(parsing_errors.clone()).with_source_code(
+                let report = miette::Report::from(parsing_errors.clone()).with_source_code(
                     NamedSource::new(current_path.display().to_string(), source_text.clone()),
                 );
                 collected_errors.push_error(report);
@@ -255,26 +251,51 @@ fn merge_modules(modules: Vec<ParsedModule>) -> DotsModule {
     let mut merged_field = AsciiField::new(final_width, final_height);
     let mut merged_functions = Vec::new();
 
-    for (module, (offset_x, offset_y)) in modules.into_iter().zip(placements.into_iter()) {
-        for (x, y, token) in &module.field {
-            let mut translated_token = token.clone();
-            if let AsciiCell::Warp { other, .. } = translated_token.inner_mut() {
-                other.x += offset_x as i32;
-                other.y += offset_y as i32;
-            }
-            let target: Position = (x + offset_x, y + offset_y).into();
-            merged_field.set_at(translated_token, &target);
+    for (mut module, (offset_x, offset_y)) in modules.into_iter().zip(placements.into_iter()) {
+        shift_module_in_place(&mut module, offset_x, offset_y);
+
+        let module_width = module.field.width();
+        for (index, token) in module.field.into_tokens().into_iter().enumerate() {
+            let target_x = offset_x + (index % module_width);
+            let target_y = offset_y + (index / module_width);
+            let target: Position = (target_x, target_y).into();
+            merged_field.set_at(token, &target);
         }
 
-        for function in module.functions {
-            let (name, position) = function.unpack();
-            let global_pos = (
-                position.x as usize + offset_x,
-                position.y as usize + offset_y,
-            );
-            merged_functions.push(AsciiFunc::new(name, global_pos));
-        }
+        merged_functions.extend(module.functions);
     }
 
     DotsModule::new(merged_field, merged_functions)
+}
+
+fn shift_module_in_place(module: &mut ParsedModule, offset_x: usize, offset_y: usize) {
+    let width = module.field.width();
+    let height = module.field.height();
+
+    for y in 0..height {
+        for x in 0..width {
+            let position: Position = (x, y).into();
+            if let Some(token) = module.field.at_spanned_mut(&position)
+                && let AsciiCell::Warp { other, .. } = token.inner_mut()
+            {
+                other.x += offset_x as i32;
+                other.y += offset_y as i32;
+            }
+        }
+    }
+
+    module.functions = module
+        .functions
+        .drain(..)
+        .map(|function| {
+            let (name, position) = function.unpack();
+            AsciiFunc::new(
+                name,
+                (
+                    position.x as usize + offset_x,
+                    position.y as usize + offset_y,
+                ),
+            )
+        })
+        .collect();
 }
