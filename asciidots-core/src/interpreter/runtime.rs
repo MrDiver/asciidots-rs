@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use log::trace;
@@ -5,6 +6,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     linker,
+    native_fun::NativeFunction,
     parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
@@ -24,17 +26,60 @@ pub enum InterpreterResult {
 pub enum InterpreterCommand {
     InputAnswer(u64, f64),
 }
-type FunDefMap = FxHashMap<String, Position>;
 
-#[derive(Debug)]
+enum FunctionDefinition {
+    Ascii(Position),
+    Native(String),
+}
+
+const EMPTY_DOT_STEP_LIMIT: usize = 1000;
+
+pub struct DotsInterpreterBuilder {
+    native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+}
+
+impl DotsInterpreterBuilder {
+    pub fn new() -> Self {
+        Self {
+            native_registry: FxHashMap::default(),
+        }
+    }
+
+    pub fn register_native_function(&mut self, function: Box<dyn NativeFunction>) -> &mut Self {
+        let name = function.name().to_string();
+        self.native_registry.insert(name, function);
+        self
+    }
+
+    pub fn build_from_file(self, path: impl AsRef<Path>) -> miette::Result<DotsInterpreter> {
+        let available_native_functions: BTreeSet<String> =
+            self.native_registry.keys().cloned().collect();
+        let linked = linker::link_file(path.as_ref(), &available_native_functions)?;
+        Ok(DotsInterpreter::from_linked(
+            linked.module,
+            linked.native_imports,
+            self.native_registry,
+        ))
+    }
+}
+
+impl Default for DotsInterpreterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct DotsInterpreter {
     field: AsciiField,
-    functions: FunDefMap,
+    functions: FxHashMap<String, FunctionDefinition>,
+    native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<RuntimeDiagnostic>,
     operator_map: FxHashMap<(usize, usize), OperatorQueues>,
     results: Vec<InterpreterResult>,
+    finished: bool,
+    empty_dot_steps: usize,
 }
 
 impl DotsInterpreter {
@@ -47,20 +92,42 @@ impl DotsInterpreter {
     }
 
     pub fn from_file(path: impl AsRef<Path>) -> miette::Result<Self> {
-        let module = linker::link_file(path.as_ref())?;
-        Ok(Self::new(module))
+        DotsInterpreterBuilder::new().build_from_file(path)
     }
 
     pub fn new(module: DotsModule) -> Self {
+        Self::from_linked(module, FxHashMap::default(), FxHashMap::default())
+    }
+
+    fn from_linked(
+        module: DotsModule,
+        native_imports: impl IntoIterator<Item = (String, String)>,
+        native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    ) -> Self {
         let (field, functions) = module.unpack();
+        let mut function_map: FxHashMap<String, FunctionDefinition> = functions
+            .iter()
+            .map(|f| {
+                let (name, pos) = f.clone().unpack();
+                (name, FunctionDefinition::Ascii(pos))
+            })
+            .collect();
+
+        for (exposed_name, source_name) in native_imports {
+            function_map.insert(exposed_name, FunctionDefinition::Native(source_name));
+        }
+
         let mut state = DotsInterpreter {
             field,
-            functions: functions.iter().map(|f| f.clone().unpack()).collect(),
+            functions: function_map,
+            native_registry,
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
             operator_map: FxHashMap::default(),
             results: Vec::with_capacity(10),
+            finished: false,
+            empty_dot_steps: 0,
         };
         state.initialize();
         state
@@ -115,6 +182,25 @@ impl DotsInterpreter {
     }
 
     fn interpret(&mut self) {
+        if self.finished {
+            return;
+        }
+
+        let mut native_returned_dots = Vec::new();
+        for native_function in self.native_registry.values_mut() {
+            native_returned_dots.extend(native_function.tick());
+        }
+
+        for mut dot in native_returned_dots {
+            if dot.dot_mut().ret().is_err() {
+                continue;
+            }
+            dot.dot_mut().step();
+            let lookahead = self.field.at_spanned(dot.position());
+            dot.next(&MachineEvent::Nothing, lookahead);
+            self.dots.push(dot);
+        }
+
         let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
         let mut i = 0;
         let mut repeat_iteration = false;
@@ -131,6 +217,10 @@ impl DotsInterpreter {
             match event {
                 MachineEvent::EndProgram => {
                     self.results.push(InterpreterResult::EndProgram);
+                    self.finished = true;
+                    self.dots.clear();
+                    self.pending_dots.clear();
+                    break;
                 }
                 MachineEvent::HitOperator => {
                     let mut dot = self.dots.swap_remove(i);
@@ -165,23 +255,44 @@ impl DotsInterpreter {
                         expected,
                         found,
                         self.field.at_spanned(dot.position()).span(),
-                    ))
+                    ));
+                    self.finished = true;
+                    self.dots.clear();
+                    self.pending_dots.clear();
+                    break;
                 }
                 MachineEvent::Call(_, name) => {
-                    // TODO: Implement Native function calls via Lua extensions
                     let fun = self.functions.get(&name);
-                    if let Some(fun) = fun {
-                        let pos: Position = (fun.x, fun.y).into();
-                        let current = self.field.at_spanned(&pos);
-                        dot.dot_mut().call(pos).step();
-                        dot.next(&MachineEvent::Nothing, current)
-                    } else {
-                        let current = self.field.at_spanned(dot.position());
-                        self.diagnostics
-                            .push(RuntimeDiagnostic::MissingFunctionDefinition {
-                                name,
-                                span: current.span(),
-                            });
+                    match fun {
+                        Some(FunctionDefinition::Ascii(fun)) => {
+                            let pos: Position = (fun.x, fun.y).into();
+                            let current = self.field.at_spanned(&pos);
+                            dot.dot_mut().call(pos).step();
+                            dot.next(&MachineEvent::Nothing, current)
+                        }
+                        Some(FunctionDefinition::Native(native_name)) => {
+                            let mut dot = self.dots.swap_remove(i);
+                            let call_site = *dot.position();
+                            dot.dot_mut().call(call_site);
+                            if let Some(native_fun) = self.native_registry.get_mut(native_name) {
+                                native_fun.dot_enter(dot);
+                                repeat_iteration = true;
+                            } else {
+                                self.diagnostics
+                                    .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                        name,
+                                        span: self.field.at_spanned(dot.position()).span(),
+                                    });
+                            }
+                        }
+                        None => {
+                            let current = self.field.at_spanned(dot.position());
+                            self.diagnostics
+                                .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                    name,
+                                    span: current.span(),
+                                });
+                        }
                     }
                 }
                 _ => {
@@ -224,9 +335,28 @@ impl DotsInterpreter {
     pub fn step(&mut self) -> Result<&[InterpreterResult], &[RuntimeDiagnostic]> {
         trace!("--- Step ---");
         self.results.clear();
+
+        if self.finished {
+            return Ok(&self.results);
+        }
+
         self.interpret();
         self.cleanup_dead_dots();
         self.handle_pending();
+
+        if !self.finished {
+            if self.dots.is_empty() {
+                self.empty_dot_steps += 1;
+                if self.empty_dot_steps >= EMPTY_DOT_STEP_LIMIT {
+                    self.finished = true;
+                    self.results.push(InterpreterResult::PrintLn(
+                        "Warning: nothing changed for 1000 steps, stopping program".to_string(),
+                    ));
+                }
+            } else {
+                self.empty_dot_steps = 0;
+            }
+        }
 
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
@@ -238,6 +368,10 @@ impl DotsInterpreter {
 
     pub fn num_dots(&self) -> usize {
         self.dots.len()
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.finished
     }
 
     pub fn get_dots(&self) -> &[DotMachine] {

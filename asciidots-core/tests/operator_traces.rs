@@ -1,15 +1,21 @@
 mod common;
 
-use common::trace_harness::{assert_ticks_to_halt, assert_values_trace};
+use asciidots_core::interpreter::DotsInterpreter;
+use common::trace_harness::{assert_interpreter_ticks_to_halt, assert_values_trace};
 
 const OP_ADD_HORIZONTAL: &str = include_str!("fixtures/operator_add_horizontal.dots");
 const OP_ADD_VERTICAL: &str = include_str!("fixtures/operator_add_vertical.dots");
 const OP_SUB_HORIZONTAL: &str = include_str!("fixtures/operator_sub_horizontal.dots");
 
+fn interpreter_from(program: &str) -> DotsInterpreter {
+    DotsInterpreter::from_string(program).expect("program should lex and initialize")
+}
+
 #[test]
 fn operator_add_horizontal_values_trace() {
+    let mut interpreter = interpreter_from(OP_ADD_HORIZONTAL);
     assert_values_trace(
-        OP_ADD_HORIZONTAL,
+        &mut interpreter,
         &[
             &[(0, 0, 0.0), (0, 1, 0.0)],
             &[(1, 0, 0.0), (1, 1, 0.0)],
@@ -30,13 +36,15 @@ fn operator_add_horizontal_values_trace() {
 
 #[test]
 fn operator_add_horizontal_ticks_to_halt() {
-    assert_ticks_to_halt(OP_ADD_HORIZONTAL, 12, 128);
+    let mut interpreter = interpreter_from(OP_ADD_HORIZONTAL);
+    assert_interpreter_ticks_to_halt(&mut interpreter, 12, 128);
 }
 
 #[test]
 fn operator_add_vertical_values_trace() {
+    let mut interpreter = interpreter_from(OP_ADD_VERTICAL);
     assert_values_trace(
-        OP_ADD_VERTICAL,
+        &mut interpreter,
         &[
             &[(0, 2, 0.0), (0, 3, 0.0)],
             &[(1, 2, 0.0), (1, 3, 0.0)],
@@ -55,13 +63,15 @@ fn operator_add_vertical_values_trace() {
 
 #[test]
 fn operator_add_vertical_ticks_to_halt() {
-    assert_ticks_to_halt(OP_ADD_VERTICAL, 10, 128);
+    let mut interpreter = interpreter_from(OP_ADD_VERTICAL);
+    assert_interpreter_ticks_to_halt(&mut interpreter, 10, 128);
 }
 
 #[test]
 fn operator_sub_horizontal_values_trace() {
+    let mut interpreter = interpreter_from(OP_SUB_HORIZONTAL);
     assert_values_trace(
-        OP_SUB_HORIZONTAL,
+        &mut interpreter,
         &[
             &[(0, 0, 0.0), (0, 1, 0.0)],
             &[(1, 0, 0.0), (1, 1, 0.0)],
@@ -83,5 +93,6 @@ fn operator_sub_horizontal_values_trace() {
 
 #[test]
 fn operator_sub_horizontal_ticks_to_halt() {
-    assert_ticks_to_halt(OP_SUB_HORIZONTAL, 13, 128);
+    let mut interpreter = interpreter_from(OP_SUB_HORIZONTAL);
+    assert_interpreter_ticks_to_halt(&mut interpreter, 13, 128);
 }

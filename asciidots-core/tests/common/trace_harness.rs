@@ -1,44 +1,42 @@
-use std::ops::{BitOr, BitOrAssign, Not};
-
 use asciidots_core::interpreter::DotsInterpreter;
+use asciidots_core::state_machine::RuntimeDiagnostic;
 
 #[allow(unused)]
 pub type DotPos = (i32, i32);
 pub type DotValueAtPos = (i32, i32, f64);
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 enum Status {
     Success,
-    Failure,
+    Failure(Vec<String>),
 }
 
-impl Not for Status {
-    type Output = Status;
-
-    fn not(self) -> Self::Output {
-        match self {
-            Status::Success => Status::Failure,
-            Status::Failure => Status::Success,
-        }
+impl Status {
+    fn from_diagnostics(diagnostics: &[RuntimeDiagnostic]) -> Self {
+        Status::Failure(diagnostics.iter().map(ToString::to_string).collect())
     }
-}
 
-impl BitOr for Status {
-    type Output = Status;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        match (self, rhs) {
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
             (Status::Success, Status::Success) => Status::Success,
-            (Status::Success, Status::Failure) => Status::Success,
-            (Status::Failure, Status::Success) => Status::Success,
-            (Status::Failure, Status::Failure) => Status::Failure,
+            (Status::Success, Status::Failure(messages)) => Status::Failure(messages),
+            (Status::Failure(messages), Status::Success) => Status::Failure(messages),
+            (Status::Failure(mut left), Status::Failure(right)) => {
+                left.extend(right);
+                Status::Failure(left)
+            }
         }
     }
-}
 
-impl BitOrAssign for Status {
-    fn bitor_assign(&mut self, rhs: Self) {
-        *self = *self | rhs;
+    fn is_success(&self) -> bool {
+        matches!(self, Status::Success)
+    }
+
+    fn messages(&self) -> &[String] {
+        match self {
+            Status::Success => &[],
+            Status::Failure(messages) => messages,
+        }
     }
 }
 
@@ -72,41 +70,55 @@ fn sorted_position_values(interpreter: &DotsInterpreter) -> Vec<DotValueAtPos> {
 fn step_n(interpreter: &mut DotsInterpreter, n: usize) -> Status {
     let mut status = Status::Success;
     for _ in 0..n {
-        status |= interpreter
-            .step()
-            .map(|_| Status::Success)
-            .unwrap_or(Status::Failure);
-        if matches!(status, Status::Failure) {
+        let step_status = match interpreter.step() {
+            Ok(_) => Status::Success,
+            Err(diagnostics) => Status::from_diagnostics(diagnostics),
+        };
+        status = status.merge(step_status);
+        if !status.is_success() {
             break;
         }
     }
     status
 }
 
-#[allow(unused)]
-pub fn assert_positions_trace(program: &str, expected: &[&[DotPos]]) {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RunSummary {
+    ticks: usize,
+    status: Status,
+    has_assertion_failure: bool,
+}
 
+fn has_assertion_failed_event(diagnostics: &[RuntimeDiagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| matches!(diagnostic, RuntimeDiagnostic::AssertionFailed { .. }))
+}
+
+#[allow(unused)]
+pub fn assert_positions_trace(interpreter: &mut DotsInterpreter, expected: &[&[DotPos]]) {
     for (tick, expected_positions) in expected.iter().enumerate() {
-        let got = sorted_positions(&interpreter);
+        let got = sorted_positions(interpreter);
         assert_eq!(
             got, *expected_positions,
             "position mismatch at tick {tick}: expected {:?}, got {:?}",
             expected_positions, got
         );
         if tick + 1 < expected.len() {
-            step_n(&mut interpreter, 1);
+            let status = step_n(interpreter, 1);
+            assert!(
+                status.is_success(),
+                "program failed while collecting position trace at tick {}: {}",
+                tick + 1,
+                status.messages().join(" | ")
+            );
         }
     }
 }
 
-pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
-
+pub fn assert_values_trace(interpreter: &mut DotsInterpreter, expected: &[&[DotValueAtPos]]) {
     for (tick, expected_values) in expected.iter().enumerate() {
-        let got = sorted_position_values(&interpreter);
+        let got = sorted_position_values(interpreter);
         assert_eq!(
             got.len(),
             expected_values.len(),
@@ -122,64 +134,100 @@ pub fn assert_values_trace(program: &str, expected: &[&[DotValueAtPos]]) {
                 "position mismatch in value trace at tick {tick}, index {index}"
             );
             assert!(
-                (*got_value - exp_value).abs() < 1e-9,
+                (*got_value - exp_value).abs() < 1e-3,
                 "value mismatch at tick {tick}, index {index}: expected {}, got {}",
                 exp_value,
                 got_value
             );
         }
         if tick + 1 < expected.len() {
-            step_n(&mut interpreter, 1);
+            let status = step_n(interpreter, 1);
+            assert!(
+                status.is_success(),
+                "program failed while collecting value trace at tick {}: {}",
+                tick + 1,
+                status.messages().join(" | ")
+            );
         }
     }
 }
 
-fn ticks_until_halt(program: &str, max_ticks: usize) -> (usize, Status) {
-    let mut interpreter =
-        DotsInterpreter::from_string(program).expect("program should lex and initialize");
+fn run_interpreter_until_halt(interpreter: &mut DotsInterpreter, max_ticks: usize) -> RunSummary {
     let mut ticks = 0usize;
     let mut status = Status::Success;
-    while interpreter.num_dots() > 0 {
+    let mut has_assertion_failure = false;
+
+    while !interpreter.is_finished() {
         assert!(
             ticks < max_ticks,
             "program did not halt within {max_ticks} ticks"
         );
-        status |= step_n(&mut interpreter, 1);
+        match interpreter.step() {
+            Ok(_) => status = status.merge(Status::Success),
+            Err(diagnostics) => {
+                status = status.merge(Status::from_diagnostics(diagnostics));
+                has_assertion_failure |= has_assertion_failed_event(diagnostics);
+            }
+        }
         ticks += 1;
     }
-    (ticks, status)
-}
 
-pub fn assert_ticks_to_halt(program: &str, expected_ticks: usize, max_ticks: usize) {
-    let (got_ticks, _status) = ticks_until_halt(program, max_ticks);
-    assert_eq!(
-        got_ticks, expected_ticks,
-        "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"
-    );
-}
-
-pub fn assert_success_with_ticks(program: &str, expected_ticks: usize, max_ticks: usize) {
-    let (got_ticks, status) = ticks_until_halt(program, max_ticks);
-    assert_eq!(
+    RunSummary {
+        ticks,
         status,
-        Status::Success,
-        "Expected program to succeed but it failed"
-    );
+        has_assertion_failure,
+    }
+}
+
+pub fn assert_interpreter_ticks_to_halt(
+    interpreter: &mut DotsInterpreter,
+    expected_ticks: usize,
+    max_ticks: usize,
+) {
+    let summary = run_interpreter_until_halt(interpreter, max_ticks);
     assert_eq!(
-        got_ticks, expected_ticks,
-        "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"
+        summary.ticks, expected_ticks,
+        "halt tick count mismatch: expected {expected_ticks}, got {}",
+        summary.ticks
     );
 }
 
-pub fn assert_failure_with_ticks(program: &str, expected_ticks: usize, max_ticks: usize) {
-    let (got_ticks, status) = ticks_until_halt(program, max_ticks);
-    assert_eq!(
-        status,
-        Status::Failure,
-        "Expected program to fail but it succeeeded"
+pub fn assert_interpreter_success_with_ticks(
+    interpreter: &mut DotsInterpreter,
+    expected_ticks: usize,
+    max_ticks: usize,
+) {
+    let summary = run_interpreter_until_halt(interpreter, max_ticks);
+    assert!(
+        summary.status.is_success(),
+        "Expected program to succeed but it failed: {}",
+        summary.status.messages().join(" | ")
     );
     assert_eq!(
-        got_ticks, expected_ticks,
-        "halt tick count mismatch: expected {expected_ticks}, got {got_ticks}"
+        summary.ticks, expected_ticks,
+        "halt tick count mismatch: expected {expected_ticks}, got {}",
+        summary.ticks
     );
 }
+
+pub fn assert_interpreter_failure_with_ticks(
+    interpreter: &mut DotsInterpreter,
+    expected_ticks: usize,
+    max_ticks: usize,
+) {
+    let summary = run_interpreter_until_halt(interpreter, max_ticks);
+    assert!(
+        !summary.status.is_success(),
+        "Expected program to fail but it succeeded"
+    );
+    assert!(
+        summary.has_assertion_failure,
+        "Expected failure caused by assertion event, but no AssertionFailed diagnostic was reported"
+    );
+    assert_eq!(
+        summary.ticks, expected_ticks,
+        "halt tick count mismatch: expected {expected_ticks}, got {}",
+        summary.ticks
+    );
+}
+

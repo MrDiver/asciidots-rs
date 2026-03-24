@@ -219,6 +219,9 @@ impl MachineStateExecutor for TravelState {
             AsciiCell::Call(name) => {
                 return Ok(MachineEvent::Call(dot.uuid(), name.clone()));
             }
+            AsciiCell::StopProgram => {
+                return Ok(MachineEvent::EndProgram);
+            }
             AsciiCell::DefRet(_) => {
                 dot.ret()
                     .expect("For now don't handle returns when not inside a function");
@@ -461,7 +464,7 @@ impl MachineStateExecutor for AssertingState {
                         },
                     )
                 })?;
-                if dot.selected() == expected {
+                if (dot.selected() - expected).abs() < 1e-3 {
                     Ok(MachineEvent::Nothing)
                 } else {
                     Ok(MachineEvent::AssertionFailed {

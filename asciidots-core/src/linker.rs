@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +19,11 @@ struct ParsedModule {
     functions: Vec<AsciiFunc>,
 }
 
+pub struct LinkOutput {
+    pub module: DotsModule,
+    pub native_imports: BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug)]
 struct PathImportSpec {
     source_module: PathBuf,
@@ -26,12 +31,22 @@ struct PathImportSpec {
     alias: Option<String>,
 }
 
-pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
+#[derive(Clone, Debug)]
+struct NativeImportSpec {
+    source_name: String,
+    exposed_name: String,
+}
+
+pub fn link_file(
+    path: &Path,
+    available_native_functions: &BTreeSet<String>,
+) -> Result<LinkOutput, LinkingErrorCollection> {
     let resolved_path = resolve_entry(path).map_err(LinkingErrorCollection::from_report)?;
 
     let mut seen_order = Vec::new();
     let mut modules = BTreeMap::new();
     let mut module_imports = BTreeMap::new();
+    let mut module_native_imports = BTreeMap::new();
     let mut active_stack = Vec::new();
     let mut collected_errors = LinkingErrorCollection::new();
 
@@ -40,6 +55,8 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
         &mut seen_order,
         &mut modules,
         &mut module_imports,
+        &mut module_native_imports,
+        available_native_functions,
         &mut active_stack,
         &mut collected_errors,
     )?;
@@ -49,6 +66,7 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
     }
 
     let imported_function_aliases = collect_imported_function_aliases(&module_imports);
+    let imported_native_aliases = collect_imported_native_aliases(&module_native_imports);
 
     let parsed_modules: Vec<ParsedModule> = seen_order
         .into_iter()
@@ -65,11 +83,10 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
         })
         .collect();
 
-    Ok(merge_modules(
-        parsed_modules,
-        &resolved_path,
-        &imported_function_aliases,
-    ))
+    Ok(LinkOutput {
+        module: merge_modules(parsed_modules, &resolved_path, &imported_function_aliases),
+        native_imports: imported_native_aliases,
+    })
 }
 
 fn load_recursive(
@@ -77,6 +94,8 @@ fn load_recursive(
     seen_order: &mut Vec<PathBuf>,
     modules: &mut BTreeMap<PathBuf, DotsModule>,
     module_imports: &mut BTreeMap<PathBuf, Vec<PathImportSpec>>,
+    module_native_imports: &mut BTreeMap<PathBuf, Vec<NativeImportSpec>>,
+    available_native_functions: &BTreeSet<String>,
     active_stack: &mut Vec<PathBuf>,
     collected_errors: &mut LinkingErrorCollection,
 ) -> Result<(), LinkingErrorCollection> {
@@ -129,44 +148,70 @@ fn load_recursive(
 
     let module_directory = current_path.parent().unwrap_or_else(|| Path::new("."));
     let mut path_imports = Vec::new();
+    let mut native_imports = Vec::new();
     for statement in dots_source.preamble() {
         let PreambleStatement::Import {
             source,
             name,
             alias,
-            ..
+            span,
         } = statement
         else {
             continue;
         };
 
-        if let ImportSource::Path(path) = source {
-            let import_target = match resolve_import(module_directory, path) {
-                Ok(target) => target,
-                Err(error) => {
-                    active_stack.pop();
-                    return Err(LinkingErrorCollection::from_report(error));
+        match source {
+            ImportSource::Path(path) => {
+                let import_target = match resolve_import(module_directory, path) {
+                    Ok(target) => target,
+                    Err(error) => {
+                        active_stack.pop();
+                        return Err(LinkingErrorCollection::from_report(error));
+                    }
+                };
+
+                path_imports.push(PathImportSpec {
+                    source_module: import_target.clone(),
+                    function_name: name.clone(),
+                    alias: alias.clone(),
+                });
+
+                load_recursive(
+                    &import_target,
+                    seen_order,
+                    modules,
+                    module_imports,
+                    module_native_imports,
+                    available_native_functions,
+                    active_stack,
+                    collected_errors,
+                )?;
+            }
+            ImportSource::Native => {
+                if !available_native_functions.contains(name) {
+                    let report = miette::miette!(
+                        labels = vec![miette::LabeledSpan::at(*span, "imported here")],
+                        "unknown native function '{}': register it on DotsInterpreterBuilder before linking",
+                        name
+                    )
+                    .with_source_code(NamedSource::new(
+                        current_path.display().to_string(),
+                        source_text.clone(),
+                    ));
+                    collected_errors.push_error(report);
+                    continue;
                 }
-            };
 
-            path_imports.push(PathImportSpec {
-                source_module: import_target.clone(),
-                function_name: name.clone(),
-                alias: alias.clone(),
-            });
-
-            load_recursive(
-                &import_target,
-                seen_order,
-                modules,
-                module_imports,
-                active_stack,
-                collected_errors,
-            )?;
+                native_imports.push(NativeImportSpec {
+                    source_name: name.clone(),
+                    exposed_name: alias.clone().unwrap_or_else(|| name.clone()),
+                });
+            }
         }
     }
 
     module_imports.insert(current_path.to_path_buf(), path_imports);
+    module_native_imports.insert(current_path.to_path_buf(), native_imports);
 
     let module = match Parser::new(dots_source).run() {
         Ok(module) => module,
@@ -213,6 +258,20 @@ fn collect_imported_function_aliases(
     }
 
     aliases_by_module
+}
+
+fn collect_imported_native_aliases(
+    module_native_imports: &BTreeMap<PathBuf, Vec<NativeImportSpec>>,
+) -> BTreeMap<String, String> {
+    let mut alias_map = BTreeMap::new();
+
+    for imports in module_native_imports.values() {
+        for import in imports {
+            alias_map.insert(import.exposed_name.clone(), import.source_name.clone());
+        }
+    }
+
+    alias_map
 }
 
 fn resolve_entry(path: &Path) -> miette::Result<PathBuf> {
