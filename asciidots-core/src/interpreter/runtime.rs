@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     linker,
-    native_fun::NativeFunction,
+    native::{NativeFunction, nativelib},
     parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
@@ -40,9 +40,15 @@ pub struct DotsInterpreterBuilder {
 
 impl DotsInterpreterBuilder {
     pub fn new() -> Self {
-        Self {
+        let mut builder = Self {
             native_registry: FxHashMap::default(),
+        };
+
+        for native_function in nativelib::default_native_library() {
+            builder.register_native_function(native_function);
         }
+
+        builder
     }
 
     pub fn register_native_function(&mut self, function: Box<dyn NativeFunction>) -> &mut Self {

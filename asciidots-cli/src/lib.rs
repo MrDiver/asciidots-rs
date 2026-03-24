@@ -22,7 +22,7 @@ pub fn check_file(path: &str) -> miette::Result<()> {
 pub fn run_file(path: &str) -> miette::Result<()> {
     let mut interpreter = DotsInterpreter::from_file(path)?;
 
-    'outer: while interpreter.num_dots() > 0 {
+    'outer: while !interpreter.is_finished() {
         let commands = interpreter.step().unwrap();
         let mut interpreter_commands = Vec::new();
         for command in commands {

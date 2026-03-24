@@ -88,7 +88,7 @@ impl RuntimeController {
 
     fn run_steps(&mut self, count: usize) -> Vec<InterpreterResult> {
         for _ in 0..count {
-            if self.interpreter.num_dots() == 0 {
+            if self.interpreter.is_finished() {
                 break;
             }
             let start = Instant::now();
