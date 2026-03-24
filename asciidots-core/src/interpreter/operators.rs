@@ -55,6 +55,10 @@ impl DotQueue {
     pub fn has_matching(&self, pred: impl Fn(&DotMachine) -> bool) -> bool {
         self.first.as_ref().map_or(false, |d| pred(d)) || self.overflow.iter().any(pred)
     }
+
+    fn iter(&self) -> impl Iterator<Item = &DotMachine> {
+        self.first.iter().chain(self.overflow.iter())
+    }
 }
 
 #[derive(Debug)]
@@ -192,5 +196,9 @@ impl OperatorQueues {
             return Some(primary);
         }
         None
+    }
+
+    pub fn dots(&self) -> impl Iterator<Item = &DotMachine> {
+        self.horizontal.iter().chain(self.vertical.iter())
     }
 }

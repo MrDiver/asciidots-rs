@@ -14,7 +14,7 @@ impl SettingsTableModel {
         steps_per_tick: usize,
         tick_count: usize,
         last_step_duration: Duration,
-        _dots: usize,
+        dots: usize,
     ) -> Self {
         let running_value = if running { "Yes" } else { "No" };
         let running_cell = TableCell::new(
@@ -28,6 +28,14 @@ impl SettingsTableModel {
         .with_bold(true);
 
         let rows = vec![
+            [
+                TableCell::new("Num Dots", TableCellKind::Changeable).with_bold(true),
+                TableCell::new(
+                    format!("{}", dots),
+                    TableCellKind::Default,
+                ),
+
+            ],
             [
                 TableCell::new("Running", TableCellKind::Changeable).with_bold(true),
                 running_cell,

@@ -35,6 +35,10 @@ impl NativeFunction for SinNative {
             })
             .collect()
     }
+
+    fn reset(&mut self) {
+        self.queued.clear();
+    }
 }
 
 fn build_native_sin_interpreter() -> DotsInterpreter {

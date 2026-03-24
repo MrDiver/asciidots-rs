@@ -38,6 +38,18 @@ impl CallStack {
     fn peek(&self) -> Option<Position> {
         self.last
     }
+
+    pub fn len(&self) -> usize {
+        self.overflow.len() + usize::from(self.last.is_some())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.last.is_none()
+    }
+
+    pub fn last(&self) -> Option<Position> {
+        self.peek()
+    }
 }
 
 impl PartialEq for CallStack {

@@ -6,4 +6,6 @@ pub trait NativeFunction {
     fn dot_enter(&mut self, dot: DotMachine);
 
     fn tick(&mut self) -> Vec<DotMachine>;
+
+    fn reset(&mut self);
 }

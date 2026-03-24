@@ -15,12 +15,15 @@ pub struct TravelState {
     is_warping: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SetState {
     waiting_input: bool,
     input: Option<f64>,
     kind: ValueSelector,
     acc: Option<u64>,
+    inside_quote: bool,
+    accumulator: String,
+    quoted_assignment_done: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +78,9 @@ impl MachineState {
             input: None,
             kind,
             acc: None,
+            inside_quote: false,
+            accumulator: String::default(),
+            quoted_assignment_done: false,
         })
     }
 
@@ -228,7 +234,7 @@ impl MachineStateExecutor for TravelState {
                 dot.step();
                 return Ok(MachineEvent::Nothing);
             }
-            AsciiCell::Comment(_) => {
+            AsciiCell::Comment(_) | AsciiCell::Negate => {
                 dot.step();
             }
             _ => return Ok(MachineEvent::Died),
@@ -280,12 +286,43 @@ impl MachineStateExecutor for SetState {
         if self.waiting_input {
             return Ok(MachineEvent::Nothing);
         }
+        if self.inside_quote {
+            dot.step();
+            if matches!(token.inner(), AsciiCell::Quote | AsciiCell::QuoteStream) {
+                self.inside_quote = false;
+                let len = self.accumulator.len();
+                let accumulator = std::mem::take(&mut self.accumulator);
+                let parsed: f64 = accumulator.parse().map_err(|_| {
+                    RuntimeDiagnostic::failed_to_parse_assert(
+                        accumulator,
+                        (token.span().offset().saturating_sub(len), len).into(),
+                    )
+                })?;
+                match self.kind {
+                    ValueSelector::Value => {
+                        dot.set_value(parsed);
+                    }
+                    ValueSelector::Addr => {
+                        dot.set_addr(parsed);
+                    }
+                }
+                self.quoted_assignment_done = true;
+            } else {
+                self.accumulator.push(char::from(token.inner()));
+            }
+            return Ok(MachineEvent::Nothing);
+        }
         match token.inner() {
             AsciiCell::Digit(d) => {
                 if self.acc.is_none() {
                     self.acc = Some(0)
                 }
                 self.acc = self.acc.map(|acc| acc * 10 + *d as u64);
+                dot.step();
+            }
+            AsciiCell::Quote | AsciiCell::QuoteStream => {
+                self.inside_quote = true;
+                self.accumulator.clear();
                 dot.step();
             }
             AsciiCell::Read => {
@@ -304,6 +341,13 @@ impl MachineStateExecutor for SetState {
 
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Set", dot.uuid());
+        if self.quoted_assignment_done {
+            self.quoted_assignment_done = false;
+            return StateTransition::Transition;
+        }
+        if self.inside_quote {
+            return StateTransition::Stay;
+        }
         if self.waiting_input && self.input.is_some() {
             match self.kind {
                 ValueSelector::Value => dot.set_value(self.input.unwrap_or_else(|| unreachable!())),
@@ -315,8 +359,9 @@ impl MachineStateExecutor for SetState {
         } else if self.waiting_input {
             return StateTransition::Stay;
         }
+
         match token.inner() {
-            AsciiCell::Read | AsciiCell::Digit(_) => StateTransition::Stay,
+            AsciiCell::Read | AsciiCell::Digit(_) | AsciiCell::Quote | AsciiCell::QuoteStream => StateTransition::Stay,
             _ => {
                 match (self.acc, self.kind) {
                     (Some(acc), ValueSelector::Value) => {

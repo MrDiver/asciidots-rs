@@ -177,7 +177,10 @@ impl RuntimeController {
     }
 
     pub fn dot_debug_table_model(&self) -> DotDebugTableModel {
-        DotDebugTableModel::from_dots(self.interpreter.get_dots())
+        DotDebugTableModel::from_dots(
+            self.interpreter.get_dots(),
+            self.interpreter.queues().values().flat_map(|queue| queue.dots()),
+        )
     }
 
     pub fn is_running(&self) -> bool {
