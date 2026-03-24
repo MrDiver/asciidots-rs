@@ -1,7 +1,7 @@
-import libs/fac.dots
-import libs/add.dots
+from libs/fac.dots import fac
+from libs/add.dots import add as addtwo
 
-.----#1---%add--="3"-
+.----#1---%addtwo--="3"-
    .-#2---/
    
 .-#4--%fac--="24"

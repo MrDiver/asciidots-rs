@@ -21,9 +21,16 @@ fn into_span(span: Span) -> SourceSpan {
 }
 
 #[derive(Clone, Debug)]
+pub enum ImportSource {
+    Path(String),
+    Native,
+}
+
+#[derive(Clone, Debug)]
 pub enum PreambleStatement {
     Import {
-        path: String,
+        source: ImportSource,
+        name: String,
         alias: Option<String>,
         span: SourceSpan,
     },
@@ -75,34 +82,58 @@ fn import_alias_parser(i: Span) -> IResult<Span, String> {
     Ok((i, name.to_string()))
 }
 
-fn import_parser(i: Span) -> IResult<Span, PreambleStatement> {
-    let (i, _) = tag("import")(i)?;
-    let (i, _) = space1(i)?;
-    let (i, name) = take_while1(|c: char| !c.is_whitespace())(i)?;
-    let (i, alias) = opt(preceded(space1, import_alias_parser)).parse(i)?;
-    Ok((
-        i,
-        PreambleStatement::Import {
-            path: name.to_string(),
-            alias: alias,
-            span: into_span(name),
-        },
-    ))
+fn import_source_parser(i: Span) -> IResult<Span, ImportSource> {
+    let (i, source) = take_while1(|c: char| !c.is_whitespace())(i)?;
+    let source = if source.fragment() == &"native" {
+        ImportSource::Native
+    } else {
+        ImportSource::Path(source.to_string())
+    };
+    Ok((i, source))
 }
 
-fn warp_parser(i: Span) -> IResult<Span, PreambleStatement> {
+fn import_name_parser(i: Span) -> IResult<Span, Span> {
+    take_while1(|c: char| c.is_alphanumeric() || c == '_')(i)
+}
+
+fn import_item_parser(i: Span) -> IResult<Span, (String, Option<String>, SourceSpan)> {
+    let (i, name) = import_name_parser(i)?;
+    let (i, alias) = opt(preceded(space1, import_alias_parser)).parse(i)?;
+    Ok((i, (name.to_string(), alias, into_span(name))))
+}
+
+fn from_import_parser(i: Span) -> IResult<Span, Vec<PreambleStatement>> {
+    let (i, _) = tag("from")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, source) = import_source_parser(i)?;
+    let (i, _) = space1(i)?;
+    let (i, _) = tag("import")(i)?;
+    let (i, _) = space1(i)?;
+    let (i, imports) =
+        separated_list1(terminated(tag(","), space0), import_item_parser).parse(i)?;
+
+    let statements = imports
+        .into_iter()
+        .map(|(name, alias, span)| PreambleStatement::Import {
+            source: source.clone(),
+            name,
+            alias,
+            span,
+        })
+        .collect();
+    Ok((i, statements))
+}
+
+fn warp_parser(i: Span) -> IResult<Span, Vec<PreambleStatement>> {
     let (i, _) = tag("warp")(i)?;
     let (i, _) = space1(i)?;
     let (i, chars) = alpha1(i)?;
     let (_, warps) = many1(anychar).parse(chars)?;
     let (i, _) = space0(i)?;
-    Ok((
-        i,
-        PreambleStatement::Warps {
+    Ok((i, vec![PreambleStatement::Warps {
             warps,
             span: into_span(chars),
-        },
-    ))
+        }]))
 }
 
 fn ascii_token_parser(i: Span) -> IResult<Span, AsciiToken> {
@@ -134,8 +165,9 @@ fn grid_parser(i: Span) -> IResult<Span, Vec<Vec<AsciiToken>>> {
 }
 
 fn dot_module_parser(i: Span) -> IResult<Span, DotsSource> {
-    let (i, preamble) =
-        many0(terminated(alt((import_parser, warp_parser)), line_ending)).parse(i)?;
+    let (i, preamble_parts) =
+        many0(terminated(alt((from_import_parser, warp_parser)), line_ending)).parse(i)?;
+    let preamble = preamble_parts.into_iter().flatten().collect();
     let (i, tokens) = grid_parser(i)?;
     Ok((
         i,

@@ -7,23 +7,31 @@ use miette::{Context, IntoDiagnostic, NamedSource};
 use crate::{
     interpreter::AsciiField,
     parser::{
-        AsciiCell, AsciiFunc, DotsModule, DotsSource, LexError, Lexer, LinkingErrorCollection,
-        Parser, ParsingErrorCollection, PreambleStatement,
+        AsciiCell, AsciiFunc, DotsModule, ImportSource, LexError, Lexer,
+        LinkingErrorCollection, Parser, ParsingErrorCollection, PreambleStatement,
     },
     primitives::Position,
 };
 
 struct ParsedModule {
+    path: PathBuf,
     field: AsciiField,
     functions: Vec<AsciiFunc>,
 }
 
+#[derive(Clone, Debug)]
+struct PathImportSpec {
+    source_module: PathBuf,
+    function_name: String,
+    alias: Option<String>,
+}
+
 pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
-    let resolved_path =
-        resolve_entry(path).map_err(|error| LinkingErrorCollection::from_report(error))?;
+    let resolved_path = resolve_entry(path).map_err(LinkingErrorCollection::from_report)?;
 
     let mut seen_order = Vec::new();
     let mut modules = BTreeMap::new();
+    let mut module_imports = BTreeMap::new();
     let mut active_stack = Vec::new();
     let mut collected_errors = LinkingErrorCollection::new();
 
@@ -31,6 +39,7 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
         &resolved_path,
         &mut seen_order,
         &mut modules,
+        &mut module_imports,
         &mut active_stack,
         &mut collected_errors,
     )?;
@@ -39,6 +48,8 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
         return Err(collected_errors);
     }
 
+    let imported_function_aliases = collect_imported_function_aliases(&module_imports);
+
     let parsed_modules: Vec<ParsedModule> = seen_order
         .into_iter()
         .map(|module_path| {
@@ -46,17 +57,26 @@ pub fn link_file(path: &Path) -> Result<DotsModule, LinkingErrorCollection> {
                 .remove(&module_path)
                 .expect("module order and module map must stay in sync");
             let (field, functions) = module.unpack();
-            ParsedModule { field, functions }
+            ParsedModule {
+                path: module_path,
+                field,
+                functions,
+            }
         })
         .collect();
 
-    Ok(merge_modules(parsed_modules))
+    Ok(merge_modules(
+        parsed_modules,
+        &resolved_path,
+        &imported_function_aliases,
+    ))
 }
 
 fn load_recursive(
     current_path: &Path,
     seen_order: &mut Vec<PathBuf>,
     modules: &mut BTreeMap<PathBuf, DotsModule>,
+    module_imports: &mut BTreeMap<PathBuf, Vec<PathImportSpec>>,
     active_stack: &mut Vec<PathBuf>,
     collected_errors: &mut LinkingErrorCollection,
 ) -> Result<(), LinkingErrorCollection> {
@@ -108,23 +128,45 @@ fn load_recursive(
     };
 
     let module_directory = current_path.parent().unwrap_or_else(|| Path::new("."));
-    for import_path in iter_import_paths(&dots_source) {
-        let import_target = match resolve_import(module_directory, import_path) {
-            Ok(target) => target,
-            Err(error) => {
-                active_stack.pop();
-                return Err(LinkingErrorCollection::from_report(error));
-            }
+    let mut path_imports = Vec::new();
+    for statement in dots_source.preamble() {
+        let PreambleStatement::Import {
+            source,
+            name,
+            alias,
+            ..
+        } = statement
+        else {
+            continue;
         };
 
-        load_recursive(
-            &import_target,
-            seen_order,
-            modules,
-            active_stack,
-            collected_errors,
-        )?;
+        if let ImportSource::Path(path) = source {
+            let import_target = match resolve_import(module_directory, path) {
+                Ok(target) => target,
+                Err(error) => {
+                    active_stack.pop();
+                    return Err(LinkingErrorCollection::from_report(error));
+                }
+            };
+
+            path_imports.push(PathImportSpec {
+                source_module: import_target.clone(),
+                function_name: name.clone(),
+                alias: alias.clone(),
+            });
+
+            load_recursive(
+                &import_target,
+                seen_order,
+                modules,
+                module_imports,
+                active_stack,
+                collected_errors,
+            )?;
+        }
     }
+
+    module_imports.insert(current_path.to_path_buf(), path_imports);
 
     let module = match Parser::new(dots_source).run() {
         Ok(module) => module,
@@ -150,14 +192,27 @@ fn load_recursive(
     Ok(())
 }
 
-fn iter_import_paths(source: &DotsSource) -> impl Iterator<Item = &str> {
-    source
-        .preamble()
-        .iter()
-        .filter_map(|statement| match statement {
-            PreambleStatement::Import { path, .. } => Some(path.as_str()),
-            _ => None,
-        })
+fn collect_imported_function_aliases(
+    module_imports: &BTreeMap<PathBuf, Vec<PathImportSpec>>,
+) -> BTreeMap<PathBuf, BTreeMap<String, Vec<String>>> {
+    let mut aliases_by_module = BTreeMap::new();
+
+    for imports in module_imports.values() {
+        for import in imports {
+            let exposed_name = import
+                .alias
+                .clone()
+                .unwrap_or_else(|| import.function_name.clone());
+            aliases_by_module
+                .entry(import.source_module.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(import.function_name.clone())
+                .or_insert_with(Vec::new)
+                .push(exposed_name);
+        }
+    }
+
+    aliases_by_module
 }
 
 fn resolve_entry(path: &Path) -> miette::Result<PathBuf> {
@@ -208,7 +263,11 @@ fn resolve_import(base_directory: &Path, import_path: &str) -> miette::Result<Pa
         .wrap_err_with(|| format!("failed to resolve import '{}'", with_extension.display()))
 }
 
-fn merge_modules(modules: Vec<ParsedModule>) -> DotsModule {
+fn merge_modules(
+    modules: Vec<ParsedModule>,
+    entry_path: &Path,
+    imported_function_aliases: &BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>,
+) -> DotsModule {
     if modules.is_empty() {
         return DotsModule::new(AsciiField::new(0, 0), Vec::new());
     }
@@ -262,7 +321,29 @@ fn merge_modules(modules: Vec<ParsedModule>) -> DotsModule {
             merged_field.set_at(token, &target);
         }
 
-        merged_functions.extend(module.functions);
+        if module.path == entry_path {
+            merged_functions.extend(module.functions);
+            continue;
+        }
+
+        if let Some(alias_map) = imported_function_aliases.get(&module.path) {
+            for function in module.functions {
+                if let Some(exposed_names) = alias_map.get(function.name()) {
+                    let position = *function.position();
+                    let original_name = function
+                        .original_name()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| function.name().to_string());
+                    for exposed_name in exposed_names {
+                        merged_functions.push(AsciiFunc::with_original_name(
+                            exposed_name.clone(),
+                            Some(original_name.clone()),
+                            position,
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     DotsModule::new(merged_field, merged_functions)
@@ -288,9 +369,10 @@ fn shift_module_in_place(module: &mut ParsedModule, offset_x: usize, offset_y: u
         .functions
         .drain(..)
         .map(|function| {
-            let (name, position) = function.unpack();
-            AsciiFunc::new(
+            let (name, original_name, position) = function.unpack_with_original();
+            AsciiFunc::with_original_name(
                 name,
+                original_name,
                 (
                     position.x as usize + offset_x,
                     position.y as usize + offset_y,
