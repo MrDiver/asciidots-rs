@@ -3,6 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use log::trace;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -58,6 +60,8 @@ pub struct RuntimeMetrics {
 pub enum ExecutionBackend {
     #[default]
     SingleThread,
+    #[cfg(feature = "parallel")]
+    Parallel,
 }
 
 pub struct DotsInterpreterBuilder {
@@ -66,10 +70,21 @@ pub struct DotsInterpreterBuilder {
 }
 
 impl DotsInterpreterBuilder {
+    fn default_execution_backend() -> ExecutionBackend {
+        #[cfg(feature = "parallel")]
+        {
+            ExecutionBackend::Parallel
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            ExecutionBackend::SingleThread
+        }
+    }
+
     pub fn new() -> Self {
         let mut builder = Self {
             native_registry: FxHashMap::default(),
-            execution_backend: ExecutionBackend::SingleThread,
+            execution_backend: Self::default_execution_backend(),
         };
 
         for native_function in nativelib::default_native_library() {
@@ -144,7 +159,7 @@ impl DotsInterpreter {
             module,
             FxHashMap::default(),
             FxHashMap::default(),
-            ExecutionBackend::SingleThread,
+            DotsInterpreterBuilder::default_execution_backend(),
         )
     }
 
@@ -175,7 +190,13 @@ impl DotsInterpreter {
             function_defs.push(definition);
         }
 
-        Self::resolve_call_sites(&mut field, &function_name_to_id);
+        match execution_backend {
+            ExecutionBackend::SingleThread => Self::resolve_call_sites(&mut field, &function_name_to_id),
+            #[cfg(feature = "parallel")]
+            ExecutionBackend::Parallel => {
+                Self::resolve_call_sites_parallel(&mut field, &function_name_to_id)
+            }
+        }
 
         let mut state = DotsInterpreter {
             field,
@@ -213,11 +234,50 @@ impl DotsInterpreter {
         }
     }
 
+    #[cfg(feature = "parallel")]
+    fn resolve_call_sites_parallel(
+        field: &mut AsciiField,
+        function_name_to_id: &FxHashMap<Arc<str>, u32>,
+    ) {
+        let width = field.width();
+        let height = field.height();
+        let field_ref: &AsciiField = field;
+        let updates: Vec<(Position, u32)> = (0..height)
+            .into_par_iter()
+            .flat_map_iter(|y| {
+                (0..width).filter_map(move |x| {
+                    let position: Position = (x, y).into();
+                    let token = field_ref.at_spanned(&position);
+                    if let AsciiCell::Call(name) = token.inner() {
+                        function_name_to_id
+                            .get(name)
+                            .copied()
+                            .map(|call_id| (position, call_id))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        for (position, call_id) in updates {
+            if let Some(token) = field.at_spanned_mut(&position) {
+                *token.inner_mut() = AsciiCell::CallById(call_id);
+            }
+        }
+    }
+
     pub fn get_field(&self) -> &AsciiField {
         &self.field
     }
 
     fn initialize(&mut self) {
+        #[cfg(feature = "parallel")]
+        if matches!(self.execution_backend, ExecutionBackend::Parallel) {
+            self.initialize_parallel();
+            return;
+        }
+
         for (x, y, token) in self.field.into_iter() {
             let position: Position = (x, y).into();
             match *token.inner() {
@@ -261,6 +321,85 @@ impl DotsInterpreter {
         }
     }
 
+    #[cfg(feature = "parallel")]
+    fn initialize_parallel(&mut self) {
+        let width = self.field.width();
+        let height = self.field.height();
+        let field = &self.field;
+
+        let (dots, operators) = (0..height)
+            .into_par_iter()
+            .map(|y| {
+                let mut row_dots = Vec::new();
+                let mut row_operators = Vec::new();
+
+                for x in 0..width {
+                    let position: Position = (x, y).into();
+                    match *field.at_spanned(&position).inner() {
+                        AsciiCell::Dot => {
+                            for direction in &[
+                                Direction::Up,
+                                Direction::Right,
+                                Direction::Down,
+                                Direction::Left,
+                            ] {
+                                let offsetpos = position + (*direction).into();
+                                match field.at(&offsetpos) {
+                                    AsciiCell::Pipe(orientation)
+                                        if *orientation == direction.orientation() =>
+                                    {
+                                        row_dots.push(DotMachine::new(
+                                            *direction,
+                                            position.x,
+                                            position.y,
+                                        ));
+                                        break;
+                                    }
+                                    AsciiCell::CrossPipe | AsciiCell::Mirror(_) => {
+                                        row_dots.push(DotMachine::new(
+                                            *direction,
+                                            position.x,
+                                            position.y,
+                                        ));
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        AsciiCell::Operator { orientation, repr } => {
+                            row_operators.push((
+                                (x, y),
+                                OperatorQueues::new(orientation, repr, false),
+                            ));
+                        }
+                        AsciiCell::Conditional(negated) => {
+                            row_operators.push((
+                                (x, y),
+                                OperatorQueues::new(Orientation::Horizontal, '~', negated),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+
+                (row_dots, row_operators)
+            })
+            .reduce(
+                || (Vec::new(), Vec::new()),
+                |mut acc, mut item| {
+                    acc.0.append(&mut item.0);
+                    acc.1.append(&mut item.1);
+                    acc
+                },
+            );
+
+        self.dots.extend(dots);
+        for (position, queue) in operators {
+            self.operator_map.insert(position, queue);
+        }
+    }
+
     fn collect_native_returns(&mut self) {
         self.native_returned_dots.clear();
         {
@@ -284,6 +423,166 @@ impl DotsInterpreter {
             self.dots.push(dot);
         }
         self.native_returned_dots = native_returned_dots;
+    }
+
+    #[cfg(feature = "parallel")]
+    fn process_active_dots_parallel(&mut self) {
+        #[derive(Debug)]
+        struct DotStepResult {
+            event: MachineEvent,
+            pending_dots: Vec<DotMachine>,
+            diagnostic: Option<RuntimeDiagnostic>,
+        }
+
+        let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
+        let mut carry_dots = Vec::with_capacity(self.dots.len());
+        let mut round_dots = std::mem::take(&mut self.dots);
+
+        while !round_dots.is_empty() {
+            let field = &self.field;
+            let step_results: Vec<DotStepResult> = round_dots
+                .par_iter_mut()
+                .map(|dot| {
+                    let token = field.at_spanned(dot.position());
+                    let mut pending_dots = Vec::new();
+                    match dot.process(token, &mut pending_dots) {
+                        Ok(event) => DotStepResult {
+                            event,
+                            pending_dots,
+                            diagnostic: None,
+                        },
+                        Err(diagnostic) => DotStepResult {
+                            event: MachineEvent::EndProgram,
+                            pending_dots,
+                            diagnostic: Some(diagnostic),
+                        },
+                    }
+                })
+                .collect();
+
+            let processed_dots = std::mem::take(&mut round_dots);
+            let mut next_round_dots = Vec::new();
+
+            for (mut dot, step_result) in processed_dots.into_iter().zip(step_results.into_iter()) {
+                let DotStepResult {
+                    event,
+                    pending_dots,
+                    diagnostic,
+                } = step_result;
+
+                if let Some(diagnostic) = diagnostic {
+                    self.diagnostics.push(diagnostic);
+                }
+                self.pending_dots.extend(pending_dots);
+
+                match event {
+                    MachineEvent::EndProgram => {
+                        self.results.push(InterpreterResult::EndProgram);
+                        self.finished = true;
+                        self.pending_dots.clear();
+                        carry_dots.clear();
+                        next_round_dots.clear();
+                        break;
+                    }
+                    MachineEvent::AssertionFailed { expected, found } => {
+                        self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
+                            expected,
+                            found,
+                            self.field.at_spanned(dot.position()).span(),
+                        ));
+                        self.finished = true;
+                        self.pending_dots.clear();
+                        carry_dots.clear();
+                        next_round_dots.clear();
+                        break;
+                    }
+                    MachineEvent::HitOperator => {
+                        dot.next(&event, &default_token);
+                        let opqueue = self
+                            .operator_map
+                            .get_mut(&(dot.position().into()))
+                            .unwrap_or_else(|| unreachable!());
+                        if let Some(dot) = opqueue.push_and_get_result(dot) {
+                            next_round_dots.push(dot)
+                        }
+                    }
+                    MachineEvent::Input(uuid) => {
+                        self.results.push(InterpreterResult::InputRequest(uuid));
+                        let lookahead = self.field.at_spanned(dot.position());
+                        dot.next(&MachineEvent::Nothing, lookahead);
+                        carry_dots.push(dot);
+                    }
+                    MachineEvent::PrintLn(s) => {
+                        self.results.push(InterpreterResult::PrintLn(s));
+                        let lookahead = self.field.at_spanned(dot.position());
+                        dot.next(&MachineEvent::Nothing, lookahead);
+                        carry_dots.push(dot);
+                    }
+                    MachineEvent::PrintChar(c) => {
+                        self.results.push(InterpreterResult::PrintChar(c));
+                        let lookahead = self.field.at_spanned(dot.position());
+                        dot.next(&MachineEvent::Nothing, lookahead);
+                        carry_dots.push(dot);
+                    }
+                    MachineEvent::Call(_, name) => {
+                        let current = self.field.at_spanned(dot.position());
+                        self.diagnostics
+                            .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                name: name.to_string(),
+                                span: current.span(),
+                            });
+                        carry_dots.push(dot);
+                    }
+                    MachineEvent::CallById(_, call_id) => {
+                        let fun = self.functions.get(call_id as usize);
+                        match fun {
+                            Some(FunctionDefinition::Ascii(fun)) => {
+                                let pos: Position = (fun.x, fun.y).into();
+                                let current = self.field.at_spanned(&pos);
+                                dot.dot_mut().call(pos).step();
+                                dot.next(&MachineEvent::Nothing, current);
+                                carry_dots.push(dot);
+                            }
+                            Some(FunctionDefinition::Native(native_name)) => {
+                                let call_site = *dot.position();
+                                dot.dot_mut().call(call_site);
+                                if let Some(native_fun) = self.native_registry.get_mut(native_name)
+                                {
+                                    native_fun.dot_enter(dot);
+                                } else {
+                                    self.diagnostics
+                                        .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                            name: format!("#{call_id}"),
+                                            span: self.field.at_spanned(&call_site).span(),
+                                        });
+                                }
+                            }
+                            None => {
+                                let current = self.field.at_spanned(dot.position());
+                                self.diagnostics
+                                    .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                        name: format!("#{call_id}"),
+                                        span: current.span(),
+                                    });
+                                carry_dots.push(dot);
+                            }
+                        }
+                    }
+                    MachineEvent::Nothing | MachineEvent::Died => {
+                        let lookahead = self.field.at_spanned(dot.position());
+                        dot.next(&event, lookahead);
+                        carry_dots.push(dot);
+                    }
+                }
+            }
+
+            if self.finished {
+                break;
+            }
+            round_dots = next_round_dots;
+        }
+
+        self.dots = carry_dots;
     }
 
     fn process_active_dots_single_thread(&mut self) {
@@ -414,6 +713,8 @@ impl DotsInterpreter {
     fn process_active_dots(&mut self) {
         match self.execution_backend {
             ExecutionBackend::SingleThread => self.process_active_dots_single_thread(),
+            #[cfg(feature = "parallel")]
+            ExecutionBackend::Parallel => self.process_active_dots_parallel(),
         }
     }
 
@@ -469,6 +770,10 @@ impl DotsInterpreter {
 
     pub fn is_finished(&self) -> bool {
         self.finished
+    }
+
+    pub fn execution_backend(&self) -> ExecutionBackend {
+        self.execution_backend
     }
 
     pub fn get_dots(&self) -> &[DotMachine] {

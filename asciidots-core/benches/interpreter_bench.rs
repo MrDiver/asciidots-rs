@@ -290,7 +290,16 @@ fn bench_heavy_workloads(c: &mut Criterion) {
         )
     });
 
-    // juliaset is intentionally long-running; benchmark a fixed long window.
+    group.finish();
+}
+
+fn bench_juliaset_quick(c: &mut Criterion) {
+    let mut group = c.benchmark_group("juliaset_quick");
+    group.warm_up_time(std::time::Duration::from_secs(1));
+    group.measurement_time(std::time::Duration::from_secs(6));
+    group.sample_size(10);
+
+    // juliaset is intentionally long-running; keep this quick for rough baselines.
     group.bench_function("juliaset_1k_steps", |b| {
         b.iter_batched(
             || make_initialized_program(JULIASET),
@@ -307,12 +316,54 @@ fn bench_heavy_workloads(c: &mut Criterion) {
         )
     });
 
-    // juliaset is intentionally long-running; benchmark a fixed long window.
-    group.bench_function("juliaset_10k_steps", |b| {
+    group.bench_function("juliaset_2k_steps", |b| {
         b.iter_batched(
             || make_initialized_program(JULIASET),
             |mut program| {
-                for _ in 0..10_000 {
+                for _ in 0..2_000 {
+                    if program.is_finished() {
+                        break;
+                    }
+                    let _ = program.step();
+                }
+                black_box(program.num_dots());
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("juliaset_4k_steps", |b| {
+        b.iter_batched(
+            || make_initialized_program(JULIASET),
+            |mut program| {
+                for _ in 0..4_000 {
+                    if program.is_finished() {
+                        break;
+                    }
+                    let _ = program.step();
+                }
+                black_box(program.num_dots());
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    // juliaset warm-state benchmark: advance 9k steps outside measured section,
+    // then measure only the next 1k steps near the 10k mark.
+    group.bench_function("juliaset_10k_steps", |b| {
+        b.iter_batched(
+            || {
+                let mut program = make_initialized_program(JULIASET);
+                for _ in 0..9_000 {
+                    if program.is_finished() {
+                        break;
+                    }
+                    let _ = program.step();
+                }
+                program
+            },
+            |mut program| {
+                for _ in 0..1_000 {
                     if program.is_finished() {
                         break;
                     }
@@ -335,5 +386,5 @@ criterion_group!(
     bench_throughput_1000_steps,
     bench_program_step
 );
-criterion_group!(benches_heavy, bench_cleanup, bench_heavy_workloads);
+criterion_group!(benches_heavy, bench_cleanup, bench_heavy_workloads, bench_juliaset_quick);
 criterion_main!(benches, benches_heavy);
