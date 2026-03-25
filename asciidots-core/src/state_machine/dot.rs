@@ -200,4 +200,13 @@ impl Dot {
     pub fn callstack(&self) -> &CallStack {
         &self.callstack
     }
+
+    pub fn push_callstack(&mut self, position: Position) -> &mut Self {
+        self.callstack.push(position);
+        self
+    }
+
+    pub fn pop_callstack(&mut self) -> Option<Position> {
+        self.callstack.pop()
+    }
 }

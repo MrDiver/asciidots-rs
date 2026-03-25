@@ -225,6 +225,9 @@ impl MachineStateExecutor for TravelState {
             AsciiCell::Call(name) => {
                 return Ok(MachineEvent::Call(dot.uuid(), name.clone()));
             }
+            AsciiCell::CallById(id) => {
+                return Ok(MachineEvent::CallById(dot.uuid(), *id));
+            }
             AsciiCell::StopProgram => {
                 return Ok(MachineEvent::EndProgram);
             }

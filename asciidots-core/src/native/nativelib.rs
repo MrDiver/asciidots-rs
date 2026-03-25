@@ -1,5 +1,6 @@
 use crate::{
     native::native_fun::NativeFunction,
+    primitives::Position,
     state_machine::DotMachine,
 };
 
@@ -592,6 +593,100 @@ impl NativeFunction for DisplayNative {
     }
 }
 
+pub struct PushScopeNative {
+    queued: Vec<DotMachine>,
+}
+
+impl PushScopeNative {
+    pub fn new() -> Self {
+        Self { queued: Vec::new() }
+    }
+}
+
+impl Default for PushScopeNative {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NativeFunction for PushScopeNative {
+    fn name(&self) -> &str {
+        "push"
+    }
+
+    fn dot_enter(&mut self, dot: DotMachine) {
+        self.queued.push(dot);
+    }
+
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+        output.extend(self.queued.drain(..).map(|mut dot| {
+            let return_pos = dot
+                .dot_mut()
+                .pop_callstack()
+                .unwrap_or_else(|| *dot.position());
+
+            let addr = dot.dot().addr();
+            let dummy_scope = if addr.is_finite() {
+                Position::new(addr as i32, addr as i32)
+            } else {
+                Position::default()
+            };
+
+            dot.dot_mut()
+                .push_callstack(dummy_scope)
+                .push_callstack(return_pos);
+            dot
+        }));
+    }
+
+    fn reset(&mut self) {
+        self.queued.clear();
+    }
+}
+
+pub struct PopScopeNative {
+    queued: Vec<DotMachine>,
+}
+
+impl PopScopeNative {
+    pub fn new() -> Self {
+        Self { queued: Vec::new() }
+    }
+}
+
+impl Default for PopScopeNative {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NativeFunction for PopScopeNative {
+    fn name(&self) -> &str {
+        "pop"
+    }
+
+    fn dot_enter(&mut self, dot: DotMachine) {
+        self.queued.push(dot);
+    }
+
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+        output.extend(self.queued.drain(..).map(|mut dot| {
+            let return_pos = dot
+                .dot_mut()
+                .pop_callstack()
+                .unwrap_or_else(|| *dot.position());
+
+            let _ = dot.dot_mut().pop_callstack();
+            dot.dot_mut().push_callstack(return_pos);
+            dot
+        }));
+    }
+
+    fn reset(&mut self) {
+        self.queued.clear();
+    }
+}
+
 pub fn default_native_library() -> Vec<Box<dyn NativeFunction>> {
     let natives: Vec<Box<dyn NativeFunction>> = vec![
         Box::new(AbsNative::new()),
@@ -618,6 +713,8 @@ pub fn default_native_library() -> Vec<Box<dyn NativeFunction>> {
         Box::new(TruncNative::new()),
         Box::new(SignumNative::new()),
         Box::new(ForNative::new()),
+        Box::new(PushScopeNative::new()),
+        Box::new(PopScopeNative::new()),
     ];
 
     #[cfg(feature = "display_window")]

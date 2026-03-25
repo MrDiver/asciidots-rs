@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 #[derive(Debug, Clone)]
 pub enum MachineEvent {
     Nothing,
@@ -8,5 +10,6 @@ pub enum MachineEvent {
     PrintLn(String),
     PrintChar(char),
     Input(u64),
-    Call(u64, String),
+    Call(u64, Arc<str>),
+    CallById(u64, u32),
 }

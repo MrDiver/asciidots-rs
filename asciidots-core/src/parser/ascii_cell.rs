@@ -1,4 +1,5 @@
 use miette::SourceSpan;
+use std::sync::Arc;
 
 use crate::primitives::{Direction, Orientation, Position};
 
@@ -95,7 +96,8 @@ pub enum AsciiCell {
         repr: char,
     }, // Any char + - / * and so on
     OperatorEnd(Orientation),   // Horizontal } and Vertical ]
-    Call(String),
+    Call(Arc<str>),
+    CallById(u32),
     DefRet(String),
     Assertion, // Standalone =, Can be used for assertions which throw an error if not met, but otherwise do nothing.
 }
@@ -144,6 +146,7 @@ impl std::fmt::Display for AsciiCell {
             AsciiCell::Assertion => write!(f, "="),
             AsciiCell::Warp { repr, .. } => write!(f, "{}", repr),
             AsciiCell::Call(_) => write!(f, "%"),
+            AsciiCell::CallById(_) => write!(f, "%"),
             AsciiCell::DefRet(_) => write!(f, "@"),
         }
     }
@@ -193,6 +196,7 @@ impl From<&AsciiCell> for char {
             AsciiCell::Assertion => '=',
             AsciiCell::Warp { repr, .. } => *repr,
             AsciiCell::Call(_) => '%',
+            AsciiCell::CallById(_) => '%',
             AsciiCell::DefRet(_) => '@',
         }
     }

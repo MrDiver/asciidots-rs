@@ -1,5 +1,6 @@
 use nom::AsChar;
 use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 use crate::{
     interpreter::AsciiField,
@@ -182,7 +183,7 @@ impl Parser {
                                 _span: token.span(),
                             });
                         }
-                        AsciiCell::Call(name.expect("Should have a name"))
+                        AsciiCell::Call(Arc::from(name.expect("Should have a name")))
                     }
                     '$' => AsciiCell::Write,
                     '?' => AsciiCell::Read,

@@ -106,3 +106,32 @@ fn native_sin_values_trace_current_behavior() {
         ],
     );
 }
+
+#[test]
+fn scope_fixture_runs_to_completion() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scope_test.dots");
+    let mut interpreter = DotsInterpreterBuilder::new()
+        .build_from_file(&fixture_path)
+        .expect("scope fixture should link and initialize");
+
+    let max_ticks = 10_000usize;
+    let mut ticks = 0usize;
+
+    while !interpreter.is_finished() {
+        assert!(ticks < max_ticks, "scope fixture did not halt within {max_ticks} ticks");
+        let step_result = interpreter.step();
+        assert!(
+            step_result.is_ok(),
+            "scope fixture failed with diagnostics: {}",
+            step_result
+                .err()
+                .map(|diagnostics| diagnostics
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" | "))
+                .unwrap_or_default()
+        );
+        ticks += 1;
+    }
+}

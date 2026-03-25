@@ -109,6 +109,7 @@ impl DotMachine {
             | MachineEvent::PrintLn(_)
             | MachineEvent::PrintChar(_)
             | MachineEvent::Call(_, _)
+            | MachineEvent::CallById(_, _)
             | MachineEvent::Input(_) => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Set(s) => s.next(&mut self.dot, lookahead),

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use log::trace;
 use rustc_hash::FxHashMap;
@@ -110,7 +111,7 @@ impl Default for DotsInterpreterBuilder {
 
 pub struct DotsInterpreter {
     field: AsciiField,
-    functions: FxHashMap<String, FunctionDefinition>,
+    functions: Vec<FunctionDefinition>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
     execution_backend: ExecutionBackend,
     native_returned_dots: Vec<DotMachine>,
@@ -153,7 +154,7 @@ impl DotsInterpreter {
         native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
         execution_backend: ExecutionBackend,
     ) -> Self {
-        let (field, functions) = module.unpack();
+        let (mut field, functions) = module.unpack();
         let mut function_map: FxHashMap<String, FunctionDefinition> = functions
             .iter()
             .map(|f| {
@@ -166,9 +167,19 @@ impl DotsInterpreter {
             function_map.insert(exposed_name, FunctionDefinition::Native(source_name));
         }
 
+        let mut function_name_to_id: FxHashMap<Arc<str>, u32> = FxHashMap::default();
+        let mut function_defs = Vec::with_capacity(function_map.len());
+        for (index, (name, definition)) in function_map.into_iter().enumerate() {
+            let call_id = index as u32;
+            function_name_to_id.insert(Arc::from(name), call_id);
+            function_defs.push(definition);
+        }
+
+        Self::resolve_call_sites(&mut field, &function_name_to_id);
+
         let mut state = DotsInterpreter {
             field,
-            functions: function_map,
+            functions: function_defs,
             native_registry,
             execution_backend,
             native_returned_dots: Vec::with_capacity(16),
@@ -184,6 +195,22 @@ impl DotsInterpreter {
         };
         state.initialize();
         state
+    }
+
+    fn resolve_call_sites(field: &mut AsciiField, function_name_to_id: &FxHashMap<Arc<str>, u32>) {
+        let width = field.width();
+        let height = field.height();
+        for y in 0..height {
+            for x in 0..width {
+                let position: Position = (x, y).into();
+                if let Some(token) = field.at_spanned_mut(&position)
+                    && let AsciiCell::Call(name) = token.inner_mut()
+                    && let Some(call_id) = function_name_to_id.get(name)
+                {
+                    *token.inner_mut() = AsciiCell::CallById(*call_id);
+                }
+            }
+        }
     }
 
     pub fn get_field(&self) -> &AsciiField {
@@ -320,7 +347,15 @@ impl DotsInterpreter {
                     break;
                 }
                 MachineEvent::Call(_, name) => {
-                    let fun = self.functions.get(&name);
+                    let current = self.field.at_spanned(dot.position());
+                    self.diagnostics
+                        .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                            name: name.to_string(),
+                            span: current.span(),
+                        });
+                }
+                MachineEvent::CallById(_, call_id) => {
+                    let fun = self.functions.get(call_id as usize);
                     match fun {
                         Some(FunctionDefinition::Ascii(fun)) => {
                             let pos: Position = (fun.x, fun.y).into();
@@ -338,7 +373,7 @@ impl DotsInterpreter {
                             } else {
                                 self.diagnostics
                                     .push(RuntimeDiagnostic::MissingFunctionDefinition {
-                                        name,
+                                        name: format!("#{call_id}"),
                                         span: self.field.at_spanned(dot.position()).span(),
                                     });
                             }
@@ -347,7 +382,7 @@ impl DotsInterpreter {
                             let current = self.field.at_spanned(dot.position());
                             self.diagnostics
                                 .push(RuntimeDiagnostic::MissingFunctionDefinition {
-                                    name,
+                                    name: format!("#{call_id}"),
                                     span: current.span(),
                                 });
                         }
