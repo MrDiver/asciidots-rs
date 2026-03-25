@@ -179,6 +179,7 @@ fn run_interpreter_until_halt(interpreter: &mut DotsInterpreter, max_ticks: usiz
     }
 }
 
+#[allow(dead_code)]
 pub fn assert_interpreter_ticks_to_halt(
     interpreter: &mut DotsInterpreter,
     expected_ticks: usize,
@@ -192,6 +193,7 @@ pub fn assert_interpreter_ticks_to_halt(
     );
 }
 
+#[allow(dead_code)]
 pub fn assert_interpreter_success_with_ticks(
     interpreter: &mut DotsInterpreter,
     expected_ticks: usize,
@@ -210,6 +212,7 @@ pub fn assert_interpreter_success_with_ticks(
     );
 }
 
+#[allow(dead_code)]
 pub fn assert_interpreter_failure_with_ticks(
     interpreter: &mut DotsInterpreter,
     expected_ticks: usize,

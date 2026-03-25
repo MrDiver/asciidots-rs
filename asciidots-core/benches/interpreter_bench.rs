@@ -1,4 +1,4 @@
-use asciidots_core::interpreter::{AsciiField, DotsInterpreter};
+use asciidots_core::interpreter::DotsInterpreter;
 use asciidots_core::parser::{AsciiCell, Parser};
 use asciidots_core::parser::{Lexer, SpanToken};
 use asciidots_core::primitives::{Direction, Position};
@@ -14,6 +14,7 @@ const FIBONACCI: &str = include_str!("../samples/fibonacci.dots");
 const PRIMES: &str = include_str!("../samples/primes.dots");
 const SUPERBIG: &str = include_str!("../samples/superbig.dots");
 const DEATHFACTORY: &str = include_str!("../samples/deathfactory.dots");
+const JULIASET: &str = include_str!("../tests/fixtures/juliaset/juliaset.dots");
 
 fn lex_source(source: &str) {
     let lexer = Lexer::new(source);
@@ -264,7 +265,11 @@ fn bench_heavy_workloads(c: &mut Criterion) {
 
     group.bench_function("superbig_parse", |b| {
         b.iter(|| {
-            let parsed = AsciiField::new(black_box(SUPERBIG))
+            let source = Lexer::new(black_box(SUPERBIG))
+                .run()
+                .expect("lexing should succeed for benchmark input");
+            let parsed = Parser::new(source)
+                .run()
                 .expect("parsing should succeed for benchmark input");
             black_box(parsed);
         })
@@ -277,6 +282,40 @@ fn bench_heavy_workloads(c: &mut Criterion) {
             || make_initialized_program(SUPERBIG),
             |mut program| {
                 while program.num_dots() > 0 {
+                    let _ = program.step();
+                }
+                black_box(program.num_dots());
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    // juliaset is intentionally long-running; benchmark a fixed long window.
+    group.bench_function("juliaset_1k_steps", |b| {
+        b.iter_batched(
+            || make_initialized_program(JULIASET),
+            |mut program| {
+                for _ in 0..1_000 {
+                    if program.is_finished() {
+                        break;
+                    }
+                    let _ = program.step();
+                }
+                black_box(program.num_dots());
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    // juliaset is intentionally long-running; benchmark a fixed long window.
+    group.bench_function("juliaset_10k_steps", |b| {
+        b.iter_batched(
+            || make_initialized_program(JULIASET),
+            |mut program| {
+                for _ in 0..10_000 {
+                    if program.is_finished() {
+                        break;
+                    }
                     let _ = program.step();
                 }
                 black_box(program.num_dots());

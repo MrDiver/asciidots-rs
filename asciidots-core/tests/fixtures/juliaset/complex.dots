@@ -1,0 +1,17 @@
+warp IBR
+warp ACDEF
+from mem import mem as m
+    /-\
+  /-*{*}-B
+  | \---{*}*-{*}I
+R-@cmpsqr* \#2/
+I-/      |/-\  B\
+         \*{*}-{-}R
+           `a^2`
+
+              D E
+          /*%m<[+]
+    A     |\----/
+C>--@step-%cmpsqr-*--{+}-F
+F/ /^     A       \%m</
+   ED                \C

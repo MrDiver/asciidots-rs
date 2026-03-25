@@ -1,3 +1,5 @@
+#![allow(unused_assignments)]
+
 use crate::parser::AsciiCell;
 use miette::{Diagnostic, SourceSpan};
 use thiserror::Error;
@@ -38,7 +40,7 @@ pub enum RuntimeDiagnostic {
         #[label("This is not a valid float")]
         span: SourceSpan,
     },
-    #[error("The function '{}' is not defined", name)]
+    #[error("The function '{name}' is not defined")]
     MissingFunctionDefinition {
         name: String,
         #[label("Missing function definition")]

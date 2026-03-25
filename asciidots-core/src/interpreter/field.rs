@@ -119,7 +119,7 @@ impl<'a> IntoIterator for &'a AsciiField {
 
     fn into_iter(self) -> Self::IntoIter {
         FieldIterator {
-            field: &self,
+            field: self,
             idx_x: 0,
             idx_y: 0,
         }

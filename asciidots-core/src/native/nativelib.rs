@@ -49,15 +49,12 @@ macro_rules! define_unary_native {
                 self.queued.push(dot);
             }
 
-            fn tick(&mut self) -> Vec<DotMachine> {
-                self.queued
-                    .drain(..)
-                    .map(|mut dot| {
-                        let value = dot.selected();
-                        dot.dot_mut().set_selected(($operation)(value));
-                        dot
-                    })
-                    .collect()
+            fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+                output.extend(self.queued.drain(..).map(|mut dot| {
+                    let value = dot.selected();
+                    dot.dot_mut().set_selected(($operation)(value));
+                    dot
+                }));
             }
 
             fn reset(&mut self) {
@@ -128,9 +125,7 @@ impl NativeFunction for ForNative {
         });
     }
 
-    fn tick(&mut self) -> Vec<DotMachine> {
-        let mut output = Vec::new();
-
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
         for iter_state in &mut self.active {
             if iter_state.current < iter_state.end {
                 let mut dot = iter_state.template.clone();
@@ -142,8 +137,6 @@ impl NativeFunction for ForNative {
 
         self.active
             .retain(|iter_state| iter_state.current < iter_state.end);
-
-        output
     }
 
     fn reset(&mut self) {
@@ -566,7 +559,7 @@ impl NativeFunction for DisplayNative {
         self.queued.push(dot);
     }
 
-    fn tick(&mut self) -> Vec<DotMachine> {
+    fn tick_into(&mut self, _output: &mut Vec<DotMachine>) {
         let queued: Vec<DotMachine> = self.queued.drain(..).collect();
 
         for dot in queued {
@@ -587,8 +580,6 @@ impl NativeFunction for DisplayNative {
                 }
             }
         }
-
-        vec![]
     }
 
     fn reset(&mut self) {

@@ -137,11 +137,6 @@ impl Parser {
                     c if inside_operator => {
                         op_length += 1;
                         if op_length > 2 {
-                            let brace = if matches!(operator_orientation, Orientation::Vertical) {
-                                ']'
-                            } else {
-                                '}'
-                            };
                             // diagnostics.push(ParsingError::MissingOpeningBrace {
                             //     _expected: brace,
                             //     _span: token.span(),
@@ -195,7 +190,7 @@ impl Parser {
                     '\'' => AsciiCell::QuoteStream,
                     ':' => AsciiCell::Filter(false),
                     ';' => AsciiCell::Filter(true),
-                    c if c.is_dec_digit() => AsciiCell::Digit(c as u8 - '0' as u8),
+                    c if c.is_dec_digit() => AsciiCell::Digit(c as u8 - b'0'),
                     c if c.is_alphabetic() && warps.contains(&c) => AsciiCell::Warp {
                         repr: c,
                         other: (0, 0).into(),
@@ -229,12 +224,12 @@ impl Parser {
                             continue;
                         }
                         let spanned = field.at_spanned(&(dx, dy).into());
-                        if let AsciiCell::Warp { repr: o_repr, .. } = spanned.inner() {
-                            if repr == o_repr {
-                                seen_warp.insert(*repr);
-                                pairs.push(((x, y), (dx, dy)));
-                                continue 'outer;
-                            }
+                        if let AsciiCell::Warp { repr: o_repr, .. } = spanned.inner()
+                            && repr == o_repr
+                        {
+                            seen_warp.insert(*repr);
+                            pairs.push(((x, y), (dx, dy)));
+                            continue 'outer;
                         }
                     }
                 }
@@ -247,15 +242,15 @@ impl Parser {
         for ((x, y), (dx, dy)) in pairs {
             let pos1: Position = (x, y).into();
             let pos2: Position = (dx, dy).into();
-            if let Some(spanned) = field.at_spanned_mut(&pos1) {
-                if let AsciiCell::Warp { other, .. } = spanned.inner_mut() {
-                    *other = pos2;
-                }
+            if let Some(spanned) = field.at_spanned_mut(&pos1)
+                && let AsciiCell::Warp { other, .. } = spanned.inner_mut()
+            {
+                *other = pos2;
             }
-            if let Some(spanned) = field.at_spanned_mut(&pos2) {
-                if let AsciiCell::Warp { other, .. } = spanned.inner_mut() {
-                    *other = pos1;
-                }
+            if let Some(spanned) = field.at_spanned_mut(&pos2)
+                && let AsciiCell::Warp { other, .. } = spanned.inner_mut()
+            {
+                *other = pos1;
             }
         }
         // dbg!(self.module.preamble());

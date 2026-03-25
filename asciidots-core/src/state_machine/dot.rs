@@ -75,8 +75,13 @@ pub struct Dot {
     callstack: CallStack,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum DotError {
+    EmptyCallstack,
+}
+
 thread_local! {
-    static DOT_COUNTER: RefCell<u64> = RefCell::new(0);
+    static DOT_COUNTER: RefCell<u64> = const { RefCell::new(0) };
 }
 
 fn next_dot_id() -> u64 {
@@ -187,8 +192,8 @@ impl Dot {
         self
     }
 
-    pub fn ret(&mut self) -> Result<(), ()> {
-        self.position = self.callstack.pop().ok_or(())?;
+    pub fn ret(&mut self) -> Result<(), DotError> {
+        self.position = self.callstack.pop().ok_or(DotError::EmptyCallstack)?;
         Ok(())
     }
 

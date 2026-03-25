@@ -280,12 +280,9 @@ impl RatatuiView {
 
     fn process_results(&mut self, results: &[InterpreterResult]) {
         for result in results {
-            match result {
-                InterpreterResult::InputRequest(uuid) => {
-                    self.input_string.clear();
-                    self.mode = ViewMode::ProcessInput(*uuid);
-                }
-                _ => {}
+            if let InterpreterResult::InputRequest(uuid) = result {
+                self.input_string.clear();
+                self.mode = ViewMode::ProcessInput(*uuid);
             }
             apply_result_to_output(
                 &mut self.output_entries,
@@ -641,18 +638,15 @@ impl DotsView for RatatuiView {
                     &mut scrollbar_state,
                 );
 
-                match self.mode {
-                    ViewMode::ProcessInput(uuid) => {
-                        let input_area = area.centered(Constraint::Max(40), Constraint::Length(4));
-                        let input_text = Paragraph::new(self.input_string.as_str()).block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .title(format!("Input for Dot({uuid})")),
-                        );
-                        frame.render_widget(Clear, input_area);
-                        frame.render_widget(input_text, input_area);
-                    }
-                    _ => {}
+                if let ViewMode::ProcessInput(uuid) = self.mode {
+                    let input_area = area.centered(Constraint::Max(40), Constraint::Length(4));
+                    let input_text = Paragraph::new(self.input_string.as_str()).block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(format!("Input for Dot({uuid})")),
+                    );
+                    frame.render_widget(Clear, input_area);
+                    frame.render_widget(input_text, input_area);
                 }
             })
             .unwrap();
@@ -672,7 +666,7 @@ impl DotsView for RatatuiView {
 
 pub fn run(content: &str) -> miette::Result<()> {
     let mut app = RuntimeController::new(content)
-        .or_else(|e| Err(e.with_source_code(NamedSource::new("Source", content.to_string()))))?;
+        .map_err(|e| e.with_source_code(NamedSource::new("Source", content.to_string())))?;
     let mut view = RatatuiView::new();
     loop {
         let command = view.poll_command();

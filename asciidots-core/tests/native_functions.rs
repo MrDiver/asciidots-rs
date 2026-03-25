@@ -25,15 +25,12 @@ impl NativeFunction for SinNative {
         self.queued.push(dot);
     }
 
-    fn tick(&mut self) -> Vec<DotMachine> {
-        self.queued
-            .drain(..)
-            .map(|mut dot| {
-                let selected = dot.selected();
-                dot.dot_mut().set_selected(selected.sin());
-                dot
-            })
-            .collect()
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+        output.extend(self.queued.drain(..).map(|mut dot| {
+            let selected = dot.selected();
+            dot.dot_mut().set_selected(selected.sin());
+            dot
+        }));
     }
 
     fn reset(&mut self) {

@@ -72,7 +72,6 @@ impl DotsSource {
 
 pub struct Lexer<'a> {
     source: &'a str,
-    diagnostics: Vec<LexError>,
 }
 
 fn import_alias_parser(i: Span) -> IResult<Span, String> {
@@ -143,7 +142,7 @@ fn ascii_token_parser(i: Span) -> IResult<Span, AsciiToken> {
         i,
         AsciiToken {
             repr: c,
-            span: span,
+            span,
         },
     ))
 }
@@ -180,10 +179,7 @@ fn dot_module_parser(i: Span) -> IResult<Span, DotsSource> {
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
-        Self {
-            source,
-            diagnostics: Vec::new(),
-        }
+        Self { source }
     }
 
     pub fn run(self) -> miette::Result<DotsSource> {

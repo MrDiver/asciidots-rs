@@ -39,7 +39,7 @@ impl DotMachine {
     }
 
     pub fn position(&self) -> &Position {
-        &self.dot.position()
+        self.dot.position()
     }
 
     pub fn direction(&self) -> Direction {

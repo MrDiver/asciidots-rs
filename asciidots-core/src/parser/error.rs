@@ -136,3 +136,9 @@ impl LinkingErrorCollection {
         self.errors.is_empty()
     }
 }
+
+impl Default for LinkingErrorCollection {
+    fn default() -> Self {
+        Self::new()
+    }
+}

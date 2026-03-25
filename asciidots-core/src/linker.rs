@@ -37,6 +37,16 @@ struct NativeImportSpec {
     exposed_name: String,
 }
 
+struct RecursiveLoadCtx<'a> {
+    seen_order: &'a mut Vec<PathBuf>,
+    modules: &'a mut BTreeMap<PathBuf, DotsModule>,
+    module_imports: &'a mut BTreeMap<PathBuf, Vec<PathImportSpec>>,
+    module_native_imports: &'a mut BTreeMap<PathBuf, Vec<NativeImportSpec>>,
+    available_native_functions: &'a BTreeSet<String>,
+    active_stack: &'a mut Vec<PathBuf>,
+    collected_errors: &'a mut LinkingErrorCollection,
+}
+
 pub fn link_file(
     path: &Path,
     available_native_functions: &BTreeSet<String>,
@@ -50,16 +60,17 @@ pub fn link_file(
     let mut active_stack = Vec::new();
     let mut collected_errors = LinkingErrorCollection::new();
 
-    load_recursive(
-        &resolved_path,
-        &mut seen_order,
-        &mut modules,
-        &mut module_imports,
-        &mut module_native_imports,
+    let mut load_ctx = RecursiveLoadCtx {
+        seen_order: &mut seen_order,
+        modules: &mut modules,
+        module_imports: &mut module_imports,
+        module_native_imports: &mut module_native_imports,
         available_native_functions,
-        &mut active_stack,
-        &mut collected_errors,
-    )?;
+        active_stack: &mut active_stack,
+        collected_errors: &mut collected_errors,
+    };
+
+    load_recursive(&resolved_path, &mut load_ctx)?;
 
     if !collected_errors.is_empty() {
         return Err(collected_errors);
@@ -91,20 +102,18 @@ pub fn link_file(
 
 fn load_recursive(
     current_path: &Path,
-    seen_order: &mut Vec<PathBuf>,
-    modules: &mut BTreeMap<PathBuf, DotsModule>,
-    module_imports: &mut BTreeMap<PathBuf, Vec<PathImportSpec>>,
-    module_native_imports: &mut BTreeMap<PathBuf, Vec<NativeImportSpec>>,
-    available_native_functions: &BTreeSet<String>,
-    active_stack: &mut Vec<PathBuf>,
-    collected_errors: &mut LinkingErrorCollection,
+    ctx: &mut RecursiveLoadCtx<'_>,
 ) -> Result<(), LinkingErrorCollection> {
-    if modules.contains_key(current_path) {
+    if ctx.modules.contains_key(current_path) {
         return Ok(());
     }
 
-    if let Some(cycle_start) = active_stack.iter().position(|path| path == current_path) {
-        let mut cycle = active_stack[cycle_start..].to_vec();
+    if let Some(cycle_start) = ctx
+        .active_stack
+        .iter()
+        .position(|path| path == current_path)
+    {
+        let mut cycle = ctx.active_stack[cycle_start..].to_vec();
         cycle.push(current_path.to_path_buf());
         let cycle_repr = cycle
             .iter()
@@ -116,7 +125,7 @@ fn load_recursive(
         )));
     }
 
-    active_stack.push(current_path.to_path_buf());
+    ctx.active_stack.push(current_path.to_path_buf());
 
     let source_text = match fs::read_to_string(current_path)
         .into_diagnostic()
@@ -124,7 +133,7 @@ fn load_recursive(
     {
         Ok(source) => source,
         Err(error) => {
-            active_stack.pop();
+            ctx.active_stack.pop();
             return Err(LinkingErrorCollection::from_report(error));
         }
     };
@@ -136,12 +145,12 @@ fn load_recursive(
                 let report = miette::Report::from(lex_error.clone()).with_source_code(
                     NamedSource::new(current_path.display().to_string(), source_text.clone()),
                 );
-                collected_errors.push_error(report);
-                active_stack.pop();
+                ctx.collected_errors.push_error(report);
+                ctx.active_stack.pop();
                 return Ok(());
             }
 
-            active_stack.pop();
+            ctx.active_stack.pop();
             return Err(LinkingErrorCollection::from_report(error));
         }
     };
@@ -165,7 +174,7 @@ fn load_recursive(
                 let import_target = match resolve_import(module_directory, path) {
                     Ok(target) => target,
                     Err(error) => {
-                        active_stack.pop();
+                        ctx.active_stack.pop();
                         return Err(LinkingErrorCollection::from_report(error));
                     }
                 };
@@ -178,17 +187,11 @@ fn load_recursive(
 
                 load_recursive(
                     &import_target,
-                    seen_order,
-                    modules,
-                    module_imports,
-                    module_native_imports,
-                    available_native_functions,
-                    active_stack,
-                    collected_errors,
+                    ctx,
                 )?;
             }
             ImportSource::Native => {
-                if !available_native_functions.contains(name) {
+                if !ctx.available_native_functions.contains(name) {
                     let report = miette::miette!(
                         labels = vec![miette::LabeledSpan::at(*span, "imported here")],
                         "unknown native function '{}': register it on DotsInterpreterBuilder before linking",
@@ -198,7 +201,7 @@ fn load_recursive(
                         current_path.display().to_string(),
                         source_text.clone(),
                     ));
-                    collected_errors.push_error(report);
+                    ctx.collected_errors.push_error(report);
                     continue;
                 }
 
@@ -210,8 +213,10 @@ fn load_recursive(
         }
     }
 
-    module_imports.insert(current_path.to_path_buf(), path_imports);
-    module_native_imports.insert(current_path.to_path_buf(), native_imports);
+    ctx.module_imports
+        .insert(current_path.to_path_buf(), path_imports);
+    ctx.module_native_imports
+        .insert(current_path.to_path_buf(), native_imports);
 
     let module = match Parser::new(dots_source).run() {
         Ok(module) => module,
@@ -220,20 +225,20 @@ fn load_recursive(
                 let report = miette::Report::from(parsing_errors.clone()).with_source_code(
                     NamedSource::new(current_path.display().to_string(), source_text.clone()),
                 );
-                collected_errors.push_error(report);
-                active_stack.pop();
+                ctx.collected_errors.push_error(report);
+                ctx.active_stack.pop();
                 return Ok(());
             }
 
-            active_stack.pop();
+            ctx.active_stack.pop();
             return Err(LinkingErrorCollection::from_report(error));
         }
     };
 
-    modules.insert(current_path.to_path_buf(), module);
-    seen_order.push(current_path.to_path_buf());
+    ctx.modules.insert(current_path.to_path_buf(), module);
+    ctx.seen_order.push(current_path.to_path_buf());
 
-    active_stack.pop();
+    ctx.active_stack.pop();
     Ok(())
 }
 

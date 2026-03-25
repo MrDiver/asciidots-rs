@@ -456,7 +456,7 @@ impl MachineStateExecutor for PrintingState {
                 dot.step();
                 self.inside_quote = true;
             }
-            c => {
+            _ => {
                 dot.step();
                 // return Err(RuntimeDiagnostic::invalid_printing_modifier(
                 //     c.clone(),

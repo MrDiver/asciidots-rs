@@ -1,6 +1,7 @@
 mod ascii_cell;
 mod error;
 mod lexer;
+#[allow(clippy::module_inception)]
 mod parser;
 
 pub use ascii_cell::{AsciiCell, AsciiFunc, MirrorKind, SpanToken, Spanned};

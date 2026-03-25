@@ -2,30 +2,82 @@ use crate::{
     primitives::{Direction, Orientation},
     state_machine::DotMachine,
 };
+use rustc_hash::FxHashMap;
 use std::{collections::VecDeque, ops::Rem};
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+struct CallsiteKey {
+    has_last: bool,
+    last_x: i32,
+    last_y: i32,
+    depth: usize,
+}
+
+impl CallsiteKey {
+    fn from_dot(dot: &DotMachine) -> Self {
+        let callstack = dot.dot().callstack();
+        if let Some(last) = callstack.last() {
+            Self {
+                has_last: true,
+                last_x: last.x,
+                last_y: last.y,
+                depth: callstack.len(),
+            }
+        } else {
+            Self {
+                has_last: false,
+                last_x: 0,
+                last_y: 0,
+                depth: 0,
+            }
+        }
+    }
+}
 
 /// A small queue for dots waiting at one side of an operator.
 #[derive(Debug, Default)]
 struct DotQueue {
-    entries: VecDeque<DotMachine>,
+    entries: FxHashMap<CallsiteKey, VecDeque<DotMachine>>,
+    total_len: usize,
 }
 
 impl DotQueue {
     fn enqueue(&mut self, dot: DotMachine) {
-        self.entries.push_back(dot);
+        let key = CallsiteKey::from_dot(&dot);
+        self.entries.entry(key).or_default().push_back(dot);
+        self.total_len += 1;
     }
 
     fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.total_len == 0
     }
 
-    pub fn remove_matching(&mut self, pred: impl Fn(&DotMachine) -> bool) -> Option<DotMachine> {
-        let idx = self.entries.iter().position(pred)?;
-        self.entries.remove(idx)
+    pub fn remove_matching_callstack(&mut self, dot: &DotMachine) -> Option<DotMachine> {
+        let key = CallsiteKey::from_dot(dot);
+        let mut should_remove_bucket = false;
+        let removed = {
+            let bucket = self.entries.get_mut(&key)?;
+            let idx = bucket.iter().position(|other| OperatorQueues::same_call(dot, other))?;
+            let removed = bucket.remove(idx);
+            if bucket.is_empty() {
+                should_remove_bucket = true;
+            }
+            removed
+        };
+
+        if should_remove_bucket {
+            self.entries.remove(&key);
+        }
+
+        if removed.is_some() {
+            self.total_len -= 1;
+        }
+
+        removed
     }
 
     fn iter(&self) -> impl Iterator<Item = &DotMachine> {
-        self.entries.iter()
+        self.entries.values().flat_map(VecDeque::iter)
     }
 }
 
@@ -67,7 +119,7 @@ impl OperatorQueues {
             return None;
         }
 
-        let other = search_queue.remove_matching(|other| Self::same_call(&dot, other));
+        let other = search_queue.remove_matching_callstack(&dot);
         let Some(other) = other else {
             same_queue.enqueue(dot);
             return None;
@@ -80,16 +132,14 @@ impl OperatorQueues {
         };
 
         if self.op == '~' {
-            let mut new_dot = primary.dot().clone();
             let condition = {
                 let tmp = secondary.dot().selected() as u64 == 0;
                 if self.negated { !tmp } else { tmp }
             };
             if !condition {
-                new_dot.set_dir(Direction::Up);
+                primary.dot_mut().set_dir(Direction::Up);
             }
-            new_dot.reset_selector();
-            primary.replace_dot(new_dot);
+            primary.dot_mut().reset_selector();
             return Some(primary);
         }
 
@@ -149,9 +199,7 @@ impl OperatorQueues {
             'x' => (a as u64 ^ b as u64) as f64,
             _ => a,
         };
-        let mut new_dot = primary.dot().clone();
-        new_dot.set_selected(new_val);
-        primary.replace_dot(new_dot);
+        primary.dot_mut().set_selected(new_val);
         Some(primary)
     }
 

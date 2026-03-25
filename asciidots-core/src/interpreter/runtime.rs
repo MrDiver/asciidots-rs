@@ -79,6 +79,7 @@ pub struct DotsInterpreter {
     field: AsciiField,
     functions: FxHashMap<String, FunctionDefinition>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    native_returned_dots: Vec<DotMachine>,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
     diagnostics: Vec<RuntimeDiagnostic>,
@@ -127,6 +128,7 @@ impl DotsInterpreter {
             field,
             functions: function_map,
             native_registry,
+            native_returned_dots: Vec::with_capacity(16),
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
             diagnostics: Vec::new(),
@@ -192,12 +194,17 @@ impl DotsInterpreter {
             return;
         }
 
-        let mut native_returned_dots = Vec::new();
-        for native_function in self.native_registry.values_mut() {
-            native_returned_dots.extend(native_function.tick());
+        self.native_returned_dots.clear();
+        {
+            let native_registry = &mut self.native_registry;
+            let native_returned_dots = &mut self.native_returned_dots;
+            for native_function in native_registry.values_mut() {
+                native_function.tick_into(native_returned_dots);
+            }
         }
 
-        for mut dot in native_returned_dots {
+        let mut native_returned_dots = std::mem::take(&mut self.native_returned_dots);
+        for mut dot in native_returned_dots.drain(..) {
             if dot.dot_mut().ret().is_err() {
                 continue;
             }
@@ -206,6 +213,7 @@ impl DotsInterpreter {
             dot.next(&MachineEvent::Nothing, lookahead);
             self.dots.push(dot);
         }
+        self.native_returned_dots = native_returned_dots;
 
         let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
         let mut i = 0;
@@ -213,7 +221,7 @@ impl DotsInterpreter {
         while i < self.dots.len() {
             let dot = &mut self.dots[i];
             let token = self.field.at_spanned(dot.position());
-            let event = match dot.process(&token, &mut self.pending_dots) {
+            let event = match dot.process(token, &mut self.pending_dots) {
                 Ok(e) => e,
                 Err(d) => {
                     self.diagnostics.push(d);
@@ -243,17 +251,17 @@ impl DotsInterpreter {
                 MachineEvent::Input(uuid) => {
                     self.results.push(InterpreterResult::InputRequest(uuid));
                     let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, &lookahead)
+                    dot.next(&MachineEvent::Nothing, lookahead)
                 }
                 MachineEvent::PrintLn(s) => {
                     self.results.push(InterpreterResult::PrintLn(s));
                     let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, &lookahead)
+                    dot.next(&MachineEvent::Nothing, lookahead)
                 }
                 MachineEvent::PrintChar(c) => {
                     self.results.push(InterpreterResult::PrintChar(c));
                     let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, &lookahead)
+                    dot.next(&MachineEvent::Nothing, lookahead)
                 }
                 MachineEvent::AssertionFailed { expected, found } => {
                     self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
@@ -302,7 +310,7 @@ impl DotsInterpreter {
                 }
                 _ => {
                     let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&event, &lookahead)
+                    dot.next(&event, lookahead)
                 }
             }
             if !repeat_iteration {
@@ -328,10 +336,10 @@ impl DotsInterpreter {
         trace!("--- Handle Commands ---");
         match command {
             InterpreterCommand::InputAnswer(uuid, value) => {
-                if let Some(machine) = self.dots.iter_mut().find(|dot| dot.uuid() == uuid) {
-                    if let MachineState::Set(s) = machine.state_mut() {
-                        s.receive_input(value);
-                    }
+                if let Some(machine) = self.dots.iter_mut().find(|dot| dot.uuid() == uuid)
+                    && let MachineState::Set(s) = machine.state_mut()
+                {
+                    s.receive_input(value);
                 }
             }
         }
@@ -353,10 +361,10 @@ impl DotsInterpreter {
             if self.dots.is_empty() {
                 self.empty_dot_steps += 1;
                 if self.empty_dot_steps >= EMPTY_DOT_STEP_LIMIT {
-                    // self.finished = true;
-                    // self.results.push(InterpreterResult::PrintLn(
-                    //     "Warning: nothing changed for 1000 steps, stopping program".to_string(),
-                    // ));
+                    self.finished = true;
+                    self.results.push(InterpreterResult::PrintLn(
+                        "Warning: nothing changed for 1000 steps, stopping program".to_string(),
+                    ));
                 }
             } else {
                 self.empty_dot_steps = 0;
