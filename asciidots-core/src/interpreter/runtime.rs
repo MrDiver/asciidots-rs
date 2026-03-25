@@ -235,8 +235,7 @@ impl DotsInterpreter {
                         .operator_map
                         .get_mut(&(dot.position().into()))
                         .unwrap_or_else(|| unreachable!());
-                    opqueue.push(dot);
-                    if let Some(dot) = opqueue.get_result() {
+                    if let Some(dot) = opqueue.push_and_get_result(dot) {
                         self.dots.push(dot)
                     }
                     repeat_iteration = true;
@@ -354,10 +353,10 @@ impl DotsInterpreter {
             if self.dots.is_empty() {
                 self.empty_dot_steps += 1;
                 if self.empty_dot_steps >= EMPTY_DOT_STEP_LIMIT {
-                    self.finished = true;
-                    self.results.push(InterpreterResult::PrintLn(
-                        "Warning: nothing changed for 1000 steps, stopping program".to_string(),
-                    ));
+                    // self.finished = true;
+                    // self.results.push(InterpreterResult::PrintLn(
+                    //     "Warning: nothing changed for 1000 steps, stopping program".to_string(),
+                    // ));
                 }
             } else {
                 self.empty_dot_steps = 0;
