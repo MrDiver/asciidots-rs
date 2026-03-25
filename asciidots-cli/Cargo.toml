@@ -3,6 +3,10 @@ name = "asciidots-cli"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+runtime-metrics = ["asciidots-core/runtime-metrics"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }

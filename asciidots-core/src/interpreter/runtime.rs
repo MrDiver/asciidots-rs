@@ -34,14 +34,41 @@ enum FunctionDefinition {
 
 const EMPTY_DOT_STEP_LIMIT: usize = 1000;
 
+#[cfg(feature = "runtime-metrics")]
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeMetrics {
+    pub step_count: u64,
+    pub dots_len: usize,
+    pub dots_capacity: usize,
+    pub pending_len: usize,
+    pub pending_capacity: usize,
+    pub native_returned_len: usize,
+    pub native_returned_capacity: usize,
+    pub operator_waiting_len: usize,
+    pub results_len: usize,
+    pub diagnostics_len: usize,
+    pub peak_dots_len: usize,
+    pub peak_pending_len: usize,
+    pub peak_native_returned_len: usize,
+    pub peak_operator_waiting_len: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ExecutionBackend {
+    #[default]
+    SingleThread,
+}
+
 pub struct DotsInterpreterBuilder {
     native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    execution_backend: ExecutionBackend,
 }
 
 impl DotsInterpreterBuilder {
     pub fn new() -> Self {
         let mut builder = Self {
             native_registry: FxHashMap::default(),
+            execution_backend: ExecutionBackend::SingleThread,
         };
 
         for native_function in nativelib::default_native_library() {
@@ -57,6 +84,11 @@ impl DotsInterpreterBuilder {
         self
     }
 
+    pub fn execution_backend(&mut self, backend: ExecutionBackend) -> &mut Self {
+        self.execution_backend = backend;
+        self
+    }
+
     pub fn build_from_file(self, path: impl AsRef<Path>) -> miette::Result<DotsInterpreter> {
         let available_native_functions: BTreeSet<String> =
             self.native_registry.keys().cloned().collect();
@@ -65,6 +97,7 @@ impl DotsInterpreterBuilder {
             linked.module,
             linked.native_imports,
             self.native_registry,
+            self.execution_backend,
         ))
     }
 }
@@ -79,6 +112,7 @@ pub struct DotsInterpreter {
     field: AsciiField,
     functions: FxHashMap<String, FunctionDefinition>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    execution_backend: ExecutionBackend,
     native_returned_dots: Vec<DotMachine>,
     dots: Vec<DotMachine>,
     pending_dots: Vec<DotMachine>,
@@ -87,6 +121,8 @@ pub struct DotsInterpreter {
     results: Vec<InterpreterResult>,
     finished: bool,
     empty_dot_steps: usize,
+    #[cfg(feature = "runtime-metrics")]
+    runtime_metrics: RuntimeMetrics,
 }
 
 impl DotsInterpreter {
@@ -103,13 +139,19 @@ impl DotsInterpreter {
     }
 
     pub fn new(module: DotsModule) -> Self {
-        Self::from_linked(module, FxHashMap::default(), FxHashMap::default())
+        Self::from_linked(
+            module,
+            FxHashMap::default(),
+            FxHashMap::default(),
+            ExecutionBackend::SingleThread,
+        )
     }
 
     fn from_linked(
         module: DotsModule,
         native_imports: impl IntoIterator<Item = (String, String)>,
         native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+        execution_backend: ExecutionBackend,
     ) -> Self {
         let (field, functions) = module.unpack();
         let mut function_map: FxHashMap<String, FunctionDefinition> = functions
@@ -128,6 +170,7 @@ impl DotsInterpreter {
             field,
             functions: function_map,
             native_registry,
+            execution_backend,
             native_returned_dots: Vec::with_capacity(16),
             dots: Vec::new(),
             pending_dots: Vec::with_capacity(10),
@@ -136,6 +179,8 @@ impl DotsInterpreter {
             results: Vec::with_capacity(10),
             finished: false,
             empty_dot_steps: 0,
+            #[cfg(feature = "runtime-metrics")]
+            runtime_metrics: RuntimeMetrics::default(),
         };
         state.initialize();
         state
@@ -189,11 +234,7 @@ impl DotsInterpreter {
         }
     }
 
-    fn interpret(&mut self) {
-        if self.finished {
-            return;
-        }
-
+    fn collect_native_returns(&mut self) {
         self.native_returned_dots.clear();
         {
             let native_registry = &mut self.native_registry;
@@ -202,7 +243,9 @@ impl DotsInterpreter {
                 native_function.tick_into(native_returned_dots);
             }
         }
+    }
 
+    fn merge_native_returns_into_dots(&mut self) {
         let mut native_returned_dots = std::mem::take(&mut self.native_returned_dots);
         for mut dot in native_returned_dots.drain(..) {
             if dot.dot_mut().ret().is_err() {
@@ -214,7 +257,9 @@ impl DotsInterpreter {
             self.dots.push(dot);
         }
         self.native_returned_dots = native_returned_dots;
+    }
 
+    fn process_active_dots_single_thread(&mut self) {
         let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
         let mut i = 0;
         let mut repeat_iteration = false;
@@ -321,6 +366,22 @@ impl DotsInterpreter {
         }
     }
 
+    fn interpret(&mut self) {
+        if self.finished {
+            return;
+        }
+
+        self.collect_native_returns();
+        self.merge_native_returns_into_dots();
+        self.process_active_dots();
+    }
+
+    fn process_active_dots(&mut self) {
+        match self.execution_backend {
+            ExecutionBackend::SingleThread => self.process_active_dots_single_thread(),
+        }
+    }
+
     pub fn cleanup_dead_dots(&mut self) {
         let mut i = 0;
         while i < self.dots.len() {
@@ -354,22 +415,10 @@ impl DotsInterpreter {
         }
 
         self.interpret();
-        self.cleanup_dead_dots();
-        self.handle_pending();
+        self.finalize_step();
 
-        if !self.finished {
-            if self.dots.is_empty() {
-                self.empty_dot_steps += 1;
-                if self.empty_dot_steps >= EMPTY_DOT_STEP_LIMIT {
-                    self.finished = true;
-                    self.results.push(InterpreterResult::PrintLn(
-                        "Warning: nothing changed for 1000 steps, stopping program".to_string(),
-                    ));
-                }
-            } else {
-                self.empty_dot_steps = 0;
-            }
-        }
+        #[cfg(feature = "runtime-metrics")]
+        self.update_runtime_metrics();
 
         if !self.diagnostics.is_empty() {
             Err(&self.diagnostics)
@@ -395,6 +444,11 @@ impl DotsInterpreter {
         &self.operator_map
     }
 
+    #[cfg(feature = "runtime-metrics")]
+    pub fn runtime_metrics(&self) -> &RuntimeMetrics {
+        &self.runtime_metrics
+    }
+
     fn handle_pending(&mut self) {
         for dot in &mut self.pending_dots {
             let pos = dot.position();
@@ -402,5 +456,61 @@ impl DotsInterpreter {
             dot.next(&MachineEvent::Nothing, tok);
         }
         self.dots.append(&mut self.pending_dots);
+    }
+
+    fn finalize_step(&mut self) {
+        self.cleanup_dead_dots();
+        self.handle_pending();
+
+        if self.finished {
+            return;
+        }
+
+        if self.dots.is_empty() {
+            self.empty_dot_steps += 1;
+            if self.empty_dot_steps >= EMPTY_DOT_STEP_LIMIT {
+                self.finished = true;
+                self.results.push(InterpreterResult::PrintLn(
+                    "Warning: nothing changed for 1000 steps, stopping program".to_string(),
+                ));
+            }
+        } else {
+            self.empty_dot_steps = 0;
+        }
+    }
+
+    #[cfg(feature = "runtime-metrics")]
+    fn update_runtime_metrics(&mut self) {
+        self.runtime_metrics.step_count += 1;
+        self.runtime_metrics.dots_len = self.dots.len();
+        self.runtime_metrics.dots_capacity = self.dots.capacity();
+        self.runtime_metrics.pending_len = self.pending_dots.len();
+        self.runtime_metrics.pending_capacity = self.pending_dots.capacity();
+        self.runtime_metrics.native_returned_len = self.native_returned_dots.len();
+        self.runtime_metrics.native_returned_capacity = self.native_returned_dots.capacity();
+        self.runtime_metrics.operator_waiting_len = self
+            .operator_map
+            .values()
+            .map(OperatorQueues::waiting_len)
+            .sum();
+        self.runtime_metrics.results_len = self.results.len();
+        self.runtime_metrics.diagnostics_len = self.diagnostics.len();
+
+        self.runtime_metrics.peak_dots_len = self
+            .runtime_metrics
+            .peak_dots_len
+            .max(self.runtime_metrics.dots_len);
+        self.runtime_metrics.peak_pending_len = self
+            .runtime_metrics
+            .peak_pending_len
+            .max(self.runtime_metrics.pending_len);
+        self.runtime_metrics.peak_native_returned_len = self
+            .runtime_metrics
+            .peak_native_returned_len
+            .max(self.runtime_metrics.native_returned_len);
+        self.runtime_metrics.peak_operator_waiting_len = self
+            .runtime_metrics
+            .peak_operator_waiting_len
+            .max(self.runtime_metrics.operator_waiting_len);
     }
 }

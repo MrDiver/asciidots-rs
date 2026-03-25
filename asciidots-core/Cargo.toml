@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["display_window"]
 display_window = ["dep:minifb"]
+runtime-metrics = []
 
 [dependencies]
 log = "0.4.29"

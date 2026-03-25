@@ -1,4 +1,4 @@
-use asciidots_cli::{check_file, run_file};
+use asciidots_cli::{check_file, inspect_file, run_file};
 use clap::{
     Parser, Subcommand,
     builder::{
@@ -37,6 +37,14 @@ enum Commands {
     },
     #[command(about = "Compiles the file (for the asciidots vm)")]
     Build { path: String },
+    #[command(about = "Runs and prints runtime metrics periodically")]
+    Inspect {
+        path: String,
+        #[arg(long, default_value_t = 250)]
+        every: usize,
+        #[arg(long)]
+        max_steps: Option<usize>,
+    },
 }
 
 fn main() -> miette::Result<()> {
@@ -54,6 +62,13 @@ fn main() -> miette::Result<()> {
                 env_logger::init();
                 run_file(&path)?;
             }
+        }
+        Commands::Inspect {
+            path,
+            every,
+            max_steps,
+        } => {
+            inspect_file(&path, every, max_steps)?;
         }
         _ => todo!(),
     }

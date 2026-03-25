@@ -206,4 +206,8 @@ impl OperatorQueues {
     pub fn dots(&self) -> impl Iterator<Item = &DotMachine> {
         self.horizontal.iter().chain(self.vertical.iter())
     }
+
+    pub fn waiting_len(&self) -> usize {
+        self.horizontal.total_len + self.vertical.total_len
+    }
 }
