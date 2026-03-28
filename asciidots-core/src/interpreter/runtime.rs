@@ -15,12 +15,47 @@ use crate::{
 
 use super::{field::AsciiField, operators::OperatorQueues};
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ColorMode {
+    Rgb,
+    Hsv,
+    Hsl,
+    #[default]
+    HueOnly,
+    BlackAndWhite,
+}
+
+impl ColorMode {
+    pub fn from_f64(value: f64) -> Self {
+        match value.round() as i64 {
+            0 => Self::Rgb,
+            1 => Self::Hsv,
+            2 => Self::Hsl,
+            3 => Self::HueOnly,
+            4 => Self::BlackAndWhite,
+            _ => Self::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum DisplayCommand {
+    SetWidth(usize),
+    SetHeight(usize),
+    SetColorMode(ColorMode),
+    SetPixel { index: usize, color: u32 },
+}
+
 #[derive(Debug, Clone)]
 pub enum InterpreterResult {
     PrintChar(char),
     PrintLn(String),
     InputRequest(u64),
     EndProgram,
+    Display {
+        display_id: u32,
+        command: DisplayCommand,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +367,20 @@ impl DotsInterpreter {
                 }
                 MachineEvent::PrintChar(c) => {
                     self.results.push(InterpreterResult::PrintChar(c));
+                    let lookahead = self.field.at_spanned(dot.position());
+                    dot.next(&MachineEvent::Nothing, lookahead)
+                }
+                MachineEvent::Display { display_id, direction, addr, value } => {
+                    let command = match direction {
+                        Direction::Left  => DisplayCommand::SetWidth(value as usize),
+                        Direction::Down  => DisplayCommand::SetHeight(value as usize),
+                        Direction::Right => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
+                        Direction::Up    => DisplayCommand::SetPixel {
+                            index: addr as usize,
+                            color: value as u32,
+                        },
+                    };
+                    self.results.push(InterpreterResult::Display { display_id, command });
                     let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, lookahead)
                 }

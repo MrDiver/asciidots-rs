@@ -39,6 +39,7 @@ pub fn apply_result_to_output(
             entries.push(OutputEntry::line(std::mem::take(current_line)));
         }
         InterpreterResult::InputRequest(_) => {}
+        InterpreterResult::Display { .. } => {}
         InterpreterResult::EndProgram => {
             if !current_line.is_empty() {
                 entries.push(OutputEntry::line(std::mem::take(current_line)));

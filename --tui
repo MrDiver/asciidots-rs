@@ -1,5 +1,0 @@
-warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /home/tristan/repositories/asciidots_playground/AsciidotsCompiler/asciidots-core/Cargo.toml
-workspace: /home/tristan/repositories/asciidots_playground/AsciidotsCompiler/Cargo.toml
-    Finished `release` profile [optimized] target(s) in 0.05s
-     Running `target/release/asciidots-cli run ./examples/juliaset.dots`

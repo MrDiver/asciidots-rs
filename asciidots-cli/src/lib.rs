@@ -40,6 +40,7 @@ pub fn run_file(path: &str) -> miette::Result<()> {
                     let value: f64 = buffer.trim().parse().into_diagnostic()?;
                     interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
                 }
+                InterpreterResult::Display { .. } => {} // handled by display backend
                 InterpreterResult::EndProgram => break 'outer,
             }
         }
@@ -84,6 +85,7 @@ pub fn inspect_file(path: &str, every: usize, max_steps: Option<usize>) -> miett
                     let value: f64 = buffer.trim().parse().into_diagnostic()?;
                     interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
                 }
+                InterpreterResult::Display { .. } => {} // handled by display backend
                 InterpreterResult::EndProgram => break 'outer,
             }
         }

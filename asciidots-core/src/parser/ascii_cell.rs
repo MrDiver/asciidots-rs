@@ -98,6 +98,7 @@ pub enum AsciiCell {
     OperatorEnd(Orientation),   // Horizontal } and Vertical ]
     Call(Arc<str>),
     CallById(u32),
+    Display(u32),
     DefRet(String),
     Assertion, // Standalone =, Can be used for assertions which throw an error if not met, but otherwise do nothing.
 }
@@ -147,6 +148,7 @@ impl std::fmt::Display for AsciiCell {
             AsciiCell::Warp { repr, .. } => write!(f, "{}", repr),
             AsciiCell::Call(_) => write!(f, "%"),
             AsciiCell::CallById(_) => write!(f, "%"),
+            AsciiCell::Display(_) => write!(f, "%"),
             AsciiCell::DefRet(_) => write!(f, "@"),
         }
     }
@@ -197,6 +199,7 @@ impl From<&AsciiCell> for char {
             AsciiCell::Warp { repr, .. } => *repr,
             AsciiCell::Call(_) => '%',
             AsciiCell::CallById(_) => '%',
+            AsciiCell::Display(_) => '%',
             AsciiCell::DefRet(_) => '@',
         }
     }

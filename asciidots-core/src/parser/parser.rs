@@ -75,6 +75,7 @@ impl Parser {
 
         let mut inside_comment = false;
         let mut inside_operator = false;
+        let mut display_counter: u32 = 0;
         let mut operator_orientation = Orientation::Horizontal;
         let mut op_length = 0;
         let mut diagnostics = Vec::new();
@@ -183,7 +184,14 @@ impl Parser {
                                 _span: token.span(),
                             });
                         }
-                        AsciiCell::Call(Arc::from(name.expect("Should have a name")))
+                        let name = name.expect("Should have a name");
+                        if name == "display" {
+                            let id = display_counter;
+                            display_counter += 1;
+                            AsciiCell::Display(id)
+                        } else {
+                            AsciiCell::Call(Arc::from(name))
+                        }
                     }
                     '$' => AsciiCell::Write,
                     '?' => AsciiCell::Read,

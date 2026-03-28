@@ -116,7 +116,8 @@ impl DotMachine {
             | MachineEvent::PrintChar(_)
             | MachineEvent::Call(_, _)
             | MachineEvent::CallById(_, _)
-            | MachineEvent::Input(_) => match &mut self.state {
+            | MachineEvent::Input(_)
+            | MachineEvent::Display { .. } => match &mut self.state {
                 MachineState::Travel(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Set(s) => s.next(&mut self.dot, lookahead),
                 MachineState::Waiting(s) => s.next(&mut self.dot, lookahead),

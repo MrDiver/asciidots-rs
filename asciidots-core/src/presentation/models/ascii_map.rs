@@ -60,12 +60,11 @@ impl GridModel for AsciiMapModel<'_> {
                 AsciiCell::ValueMarker => GridCellKind::Command,
                 AsciiCell::Write => GridCellKind::Command,
                 AsciiCell::Read => GridCellKind::Command,
-                    AsciiCell::Call(_)
-                    | AsciiCell::CallById(_)
-                    | AsciiCell::DefRet(_)
-                    | AsciiCell::Warp { .. } => {
-                    GridCellKind::ActiveOperator
-                }
+                AsciiCell::Call(_)
+                | AsciiCell::CallById(_)
+                | AsciiCell::Display(_)
+                | AsciiCell::DefRet(_)
+                | AsciiCell::Warp { .. } => GridCellKind::ActiveOperator,
                 _ => GridCellKind::Default,
             }
         };
