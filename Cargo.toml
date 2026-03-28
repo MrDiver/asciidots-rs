@@ -1,8 +1,11 @@
 [workspace]
-members =[
+members = [
 	"asciidots-core",
 	"asciidots-cli",
-	"asciidots-tui"
-, "asciidots-graph"]
+	"asciidots-tui",
+	"asciidots-graph",
+	"asciidots-display-minifb",
+	"asciidots-display-ratatui",
+]
 
 resolver="2"

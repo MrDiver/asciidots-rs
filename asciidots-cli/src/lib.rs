@@ -2,9 +2,12 @@ use std::io::{self, Write};
 
 use asciidots_core::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
+    display::DisplayBackend,
     parser::{LexError},
 };
+use asciidots_display_minifb::MinifbDisplayBackend;
 use miette::{Diagnostic, IntoDiagnostic};
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -19,8 +22,9 @@ pub fn check_file(path: &str) -> miette::Result<()> {
     Ok(())
 }
 
-pub fn run_file(path: &str) -> miette::Result<()> {
+pub fn run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
     let mut interpreter = DotsInterpreter::from_file(path)?;
+    let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
 
     'outer: while !interpreter.is_finished() {
         let commands = interpreter.step().unwrap();
@@ -40,7 +44,14 @@ pub fn run_file(path: &str) -> miette::Result<()> {
                     let value: f64 = buffer.trim().parse().into_diagnostic()?;
                     interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
                 }
-                InterpreterResult::Display { .. } => {} // handled by display backend
+                InterpreterResult::Display { display_id, command } => {
+                    if use_minifb {
+                        let backend = display_backends
+                            .entry(*display_id)
+                            .or_insert_with(|| Box::new(MinifbDisplayBackend::new()));
+                        backend.handle(command.clone());
+                    }
+                }
                 InterpreterResult::EndProgram => break 'outer,
             }
         }
@@ -85,7 +96,7 @@ pub fn inspect_file(path: &str, every: usize, max_steps: Option<usize>) -> miett
                     let value: f64 = buffer.trim().parse().into_diagnostic()?;
                     interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
                 }
-                InterpreterResult::Display { .. } => {} // handled by display backend
+                InterpreterResult::Display { .. } => {} // display not shown in inspect mode
                 InterpreterResult::EndProgram => break 'outer,
             }
         }

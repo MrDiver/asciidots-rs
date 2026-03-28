@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 asciidots-core = {path="../asciidots-core/"}
+asciidots-display-minifb = {path="../asciidots-display-minifb/"}
+asciidots-display-ratatui = {path="../asciidots-display-ratatui/"}
 crossterm = "0.29.0"
 miette = "7.6.0"
 ratatui = "0.30.0"

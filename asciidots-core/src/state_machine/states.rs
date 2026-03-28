@@ -229,14 +229,12 @@ impl MachineStateExecutor for TravelState {
                 return Ok(MachineEvent::CallById(dot.uuid(), *id));
             }
             AsciiCell::Display(display_id) => {
-                let event = MachineEvent::Display {
+                return Ok(MachineEvent::Display {
                     display_id: *display_id,
                     direction: dot.direction(),
                     addr: dot.addr(),
                     value: dot.value(),
-                };
-                dot.step();
-                return Ok(event);
+                });
             }
             AsciiCell::StopProgram => {
                 return Ok(MachineEvent::EndProgram);

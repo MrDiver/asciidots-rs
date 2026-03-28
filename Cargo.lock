@@ -132,10 +132,12 @@ name = "asciidots-cli"
 version = "0.1.0"
 dependencies = [
  "asciidots-core",
+ "asciidots-display-minifb",
  "asciidots-tui",
  "clap",
  "env_logger",
  "miette",
+ "rustc-hash",
  "thiserror 2.0.18",
 ]
 
@@ -146,11 +148,26 @@ dependencies = [
  "criterion",
  "log",
  "miette",
- "minifb",
  "nom 8.0.0",
  "nom_locate",
  "rustc-hash",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "asciidots-display-minifb"
+version = "0.1.0"
+dependencies = [
+ "asciidots-core",
+ "minifb",
+]
+
+[[package]]
+name = "asciidots-display-ratatui"
+version = "0.1.0"
+dependencies = [
+ "asciidots-core",
+ "ratatui",
 ]
 
 [[package]]
@@ -166,6 +183,8 @@ name = "asciidots-tui"
 version = "0.1.0"
 dependencies = [
  "asciidots-core",
+ "asciidots-display-minifb",
+ "asciidots-display-ratatui",
  "crossterm",
  "miette",
  "ratatui",
@@ -1105,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "libredox"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1744e39d1d6a9948f4f388969627434e31128196de472883b39f148769bfe30a"
+checksum = "7ddbf48fd451246b1f8c2610bd3b4ac0cc6e149d89832867093ab69a17194f08"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -2125,10 +2144,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

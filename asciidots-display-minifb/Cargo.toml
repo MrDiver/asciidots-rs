@@ -1,0 +1,8 @@
+[package]
+name = "asciidots-display-minifb"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+asciidots-core = { path = "../asciidots-core" }
+minifb = "0.28.0"

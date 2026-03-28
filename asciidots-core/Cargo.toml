@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["display_window"]
-display_window = ["dep:minifb"]
 runtime-metrics = []
 
 [dependencies]
@@ -15,7 +13,6 @@ nom = "8.0.0"
 nom_locate = "5.0.0"
 rustc-hash = "2.1.1"
 thiserror = "2.0.18"
-minifb = { version = "0.28.0", optional = true }
 
 [dev-dependencies]
 criterion = "0.8.2"

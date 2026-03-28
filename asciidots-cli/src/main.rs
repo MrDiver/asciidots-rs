@@ -1,6 +1,7 @@
 use asciidots_cli::{check_file, inspect_file, run_file};
+use asciidots_tui::TuiDisplayMode;
 use clap::{
-    Parser, Subcommand,
+    Parser, Subcommand, ValueEnum,
     builder::{
         Styles,
         styling::{AnsiColor, Effects},
@@ -16,6 +17,14 @@ fn styles() -> Styles {
         .error(AnsiColor::Red.on_default() | Effects::BOLD)
         .valid(AnsiColor::Green.on_default() | Effects::BOLD)
         .invalid(AnsiColor::Red.on_default() | Effects::BOLD)
+}
+
+#[derive(ValueEnum, Clone, Default)]
+enum DisplayBackend {
+    #[default]
+    Minifb,
+    Ratatui,
+    None,
 }
 
 #[derive(Parser)]
@@ -34,6 +43,8 @@ enum Commands {
         path: String,
         #[arg(long)]
         tui: bool,
+        #[arg(long, default_value = "minifb")]
+        display: DisplayBackend,
     },
     #[command(about = "Compiles the file (for the asciidots vm)")]
     Build { path: String },
@@ -55,12 +66,16 @@ fn main() -> miette::Result<()> {
             check_file(&path)?;
             println!("No errors found");
         }
-        Commands::Run { path, tui } => {
+        Commands::Run { path, tui, display } => {
             if tui {
-                asciidots_tui::run_file(&path)?;
+                let display_mode = match display {
+                    DisplayBackend::Minifb => TuiDisplayMode::Minifb,
+                    DisplayBackend::Ratatui | DisplayBackend::None => TuiDisplayMode::Ratatui,
+                };
+                asciidots_tui::run_file(&path, display_mode)?;
             } else {
                 env_logger::init();
-                run_file(&path)?;
+                run_file(&path, matches!(display, DisplayBackend::Minifb))?;
             }
         }
         Commands::Inspect {

@@ -1,7 +1,6 @@
 warp CDFIJ
 warp WXYZ
 warp G
-from native import display
 from complex import cmpsqr,step
 from for import for
 

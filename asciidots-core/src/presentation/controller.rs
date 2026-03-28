@@ -87,6 +87,7 @@ impl RuntimeController {
     }
 
     fn run_steps(&mut self, count: usize) -> Vec<InterpreterResult> {
+        let mut all_results = Vec::new();
         for _ in 0..count {
             if self.interpreter.is_finished() {
                 break;
@@ -95,11 +96,15 @@ impl RuntimeController {
             let results = self.interpreter.step().unwrap().to_vec();
             self.last_step_duration = start.elapsed();
             self.tick_count += 1;
-            if !results.is_empty() {
-                return results;
+            let needs_input = results.iter().any(|r| {
+                matches!(r, InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram)
+            });
+            all_results.extend(results);
+            if needs_input {
+                break;
             }
         }
-        Vec::new()
+        all_results
     }
 
     fn set_tick_speed_ms(&mut self, ms: u64) {

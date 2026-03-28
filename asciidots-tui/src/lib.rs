@@ -1,12 +1,17 @@
 use std::{path::Path, time::Duration};
 
+use asciidots_core::display::DisplayBackend;
 use asciidots_core::interpreter::InterpreterResult;
 use asciidots_core::presentation::{
     AppCommand, DotsView, GridCell, GridCellKind, GridModel, ListCell, ListCellKind, ListModel,
     OutputEntry, OutputListModel, RuntimeController, TableCell, TableCellKind, TableModel,
     apply_result_to_output,
 };
+use asciidots_display_minifb::MinifbDisplayBackend;
+use asciidots_display_ratatui::{DisplayBuffer, DisplayWidget, RatatuiDisplayBackend};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use rustc_hash::FxHashMap;
+use std::sync::{Arc, RwLock};
 use miette::NamedSource;
 use ratatui::widgets::Paragraph;
 use ratatui::{
@@ -251,6 +256,11 @@ pub enum ViewMode {
     ProcessInput(u64),
 }
 
+pub enum TuiDisplayMode {
+    Minifb,
+    Ratatui,
+}
+
 pub struct RatatuiView {
     term: DefaultTerminal,
     grid_scroll: (usize, usize),
@@ -261,10 +271,17 @@ pub struct RatatuiView {
     running: bool,
     mode: ViewMode,
     input_string: String,
+    display_mode: TuiDisplayMode,
+    display_backends: FxHashMap<u32, Box<dyn DisplayBackend>>,
+    ratatui_buffers: FxHashMap<u32, Arc<RwLock<DisplayBuffer>>>,
 }
 
 impl RatatuiView {
     pub fn new() -> Self {
+        Self::with_display_mode(TuiDisplayMode::Ratatui)
+    }
+
+    pub fn with_display_mode(display_mode: TuiDisplayMode) -> Self {
         RatatuiView {
             term: ratatui::init(),
             grid_scroll: (0, 0),
@@ -275,6 +292,9 @@ impl RatatuiView {
             running: false,
             mode: ViewMode::Normal,
             input_string: String::new(),
+            display_mode,
+            display_backends: FxHashMap::default(),
+            ratatui_buffers: FxHashMap::default(),
         }
     }
 
@@ -283,6 +303,21 @@ impl RatatuiView {
             if let InterpreterResult::InputRequest(uuid) = result {
                 self.input_string.clear();
                 self.mode = ViewMode::ProcessInput(*uuid);
+            }
+            if let InterpreterResult::Display { display_id, command } = result {
+                let id = *display_id;
+                if !self.display_backends.contains_key(&id) {
+                    let backend: Box<dyn DisplayBackend> = match self.display_mode {
+                        TuiDisplayMode::Minifb => Box::new(MinifbDisplayBackend::new()),
+                        TuiDisplayMode::Ratatui => {
+                            let backend = RatatuiDisplayBackend::new();
+                            self.ratatui_buffers.insert(id, backend.buffer());
+                            Box::new(backend)
+                        }
+                    };
+                    self.display_backends.insert(id, backend);
+                }
+                self.display_backends.get_mut(&id).unwrap().handle(command.clone());
             }
             apply_result_to_output(
                 &mut self.output_entries,
@@ -297,6 +332,8 @@ impl RatatuiView {
         self.current_output_line.clear();
         self.output_scroll = 0;
         self.output_follow = true;
+        self.display_backends.clear();
+        self.ratatui_buffers.clear();
     }
 
     fn handle_key_event(&mut self, event: &KeyEvent) -> Option<AppCommand> {
@@ -491,13 +528,31 @@ impl DotsView for RatatuiView {
                         Constraint::Percentage(44),
                     ])
                     .split(cols[1]);
+                let ratatui_buffers: Vec<_> = {
+                    let mut ids: Vec<u32> = self.ratatui_buffers.keys().copied().collect();
+                    ids.sort();
+                    ids.into_iter()
+                        .filter_map(|id| self.ratatui_buffers.get(&id).map(|b| (id, Arc::clone(b))))
+                        .collect()
+                };
+
+                let left_rows = if ratatui_buffers.is_empty() {
+                    vec![cols[0]]
+                } else {
+                    Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                        .split(cols[0])
+                        .to_vec()
+                };
+
                 let program_block = Block::default()
                     .title("Program")
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(RGB::LAVENDER.into()));
-                let program_inner = program_block.inner(cols[0]);
+                let program_inner = program_block.inner(left_rows[0]);
 
-                frame.render_widget(program_block, cols[0]);
+                frame.render_widget(program_block, left_rows[0]);
                 frame.render_widget(Clear, program_inner);
                 frame.render_widget(
                     GridWidget {
@@ -506,6 +561,24 @@ impl DotsView for RatatuiView {
                     },
                     program_inner,
                 );
+
+                if !ratatui_buffers.is_empty() {
+                    let display_area = left_rows[1];
+                    let count = ratatui_buffers.len() as u32;
+                    let display_cols = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
+                        .split(display_area);
+                    for ((id, buffer), panel_area) in ratatui_buffers.iter().zip(display_cols.iter()) {
+                        let display_block = Block::default()
+                            .title(format!("Display {id}"))
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(RGB::BUBBLEGUM.into()));
+                        let display_inner = display_block.inner(*panel_area);
+                        frame.render_widget(display_block, *panel_area);
+                        frame.render_widget(DisplayWidget::new(Arc::clone(buffer)), display_inner);
+                    }
+                }
                 let settings_block = Block::default()
                     .title("Status")
                     .borders(Borders::ALL)
@@ -689,10 +762,10 @@ pub fn run(content: &str) -> miette::Result<()> {
     Ok(())
 }
 
-pub fn run_file(path: impl AsRef<Path>) -> miette::Result<()> {
+pub fn run_file(path: impl AsRef<Path>, display_mode: TuiDisplayMode) -> miette::Result<()> {
     let path_ref = path.as_ref();
     let mut app = RuntimeController::new_from_file(path_ref)?;
-    let mut view = RatatuiView::new();
+    let mut view = RatatuiView::with_display_mode(display_mode);
     loop {
         let command = view.poll_command();
         if let Some(c) = command {

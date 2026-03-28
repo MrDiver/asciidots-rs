@@ -43,7 +43,7 @@ pub enum DisplayCommand {
     SetWidth(usize),
     SetHeight(usize),
     SetColorMode(ColorMode),
-    SetPixel { index: usize, color: u32 },
+    SetPixel { index: usize, value: f64 },
 }
 
 #[derive(Debug, Clone)]
@@ -372,17 +372,25 @@ impl DotsInterpreter {
                 }
                 MachineEvent::Display { display_id, direction, addr, value } => {
                     let command = match direction {
-                        Direction::Left  => DisplayCommand::SetWidth(value as usize),
-                        Direction::Down  => DisplayCommand::SetHeight(value as usize),
-                        Direction::Right => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
-                        Direction::Up    => DisplayCommand::SetPixel {
+                        Direction::Right => DisplayCommand::SetWidth(value.round() as usize),
+                        Direction::Up    => DisplayCommand::SetHeight(value.round() as usize),
+                        Direction::Left  => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
+                        Direction::Down  => DisplayCommand::SetPixel {
                             index: addr as usize,
-                            color: value as u32,
+                            value,
                         },
                     };
                     self.results.push(InterpreterResult::Display { display_id, command });
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, lookahead)
+                    if direction == Direction::Down {
+                        let dot = &mut self.dots[i];
+                        dot.dot_mut().set_dir(Direction::Up).step();
+                        let lookahead = self.field.at_spanned(dot.position());
+                        dot.next(&MachineEvent::Nothing, lookahead);
+                        i += 1;
+                    } else {
+                        self.dots.swap_remove(i);
+                        repeat_iteration = true;
+                    }
                 }
                 MachineEvent::AssertionFailed { expected, found } => {
                     self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
