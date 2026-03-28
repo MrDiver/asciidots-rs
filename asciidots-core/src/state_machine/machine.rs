@@ -1,7 +1,7 @@
 use crate::{
     parser::{AsciiCell, SpanToken},
     primitives::{Direction, Position},
-    state_machine::ValueSelector,
+    state_machine::{Callstackable, ValueSelector},
 };
 
 use super::dot::Dot;
@@ -133,6 +133,16 @@ impl DotMachine {
                 _ => MachineState::travel(),
             }
         }
+    }
+}
+
+impl Callstackable<Position> for DotMachine {
+    fn callstack(&self) -> &super::CallStack<Position> {
+        self.dot().callstack()
+    }
+
+    fn callstack_mut(&mut self) -> &mut super::CallStack<Position> {
+        self.dot_mut().callstack_mut()
     }
 }
 

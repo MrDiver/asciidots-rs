@@ -3,6 +3,6 @@ members =[
 	"asciidots-core",
 	"asciidots-cli",
 	"asciidots-tui"
-]
+, "asciidots-graph"]
 
 resolver="2"

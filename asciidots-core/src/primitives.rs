@@ -40,8 +40,16 @@ pub enum Orientation {
     Vertical,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+pub trait Oriented {
+    fn orientation(&self) -> Orientation;
+}
+
+pub trait Directed {
+    fn direction(&self) -> Direction;
+    fn set_direction(&mut self, direction: Direction);
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -52,7 +60,6 @@ impl Position {
         Position { x, y }
     }
 }
-
 
 impl PartialEq for Position {
     fn eq(&self, other: &Self) -> bool {

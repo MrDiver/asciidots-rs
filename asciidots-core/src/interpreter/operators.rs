@@ -57,7 +57,9 @@ impl DotQueue {
         let mut should_remove_bucket = false;
         let removed = {
             let bucket = self.entries.get_mut(&key)?;
-            let idx = bucket.iter().position(|other| OperatorQueues::same_call(dot, other))?;
+            let idx = bucket
+                .iter()
+                .position(|other| dot.dot().callstack() == other.dot().callstack())?;
             let removed = bucket.remove(idx);
             if bucket.is_empty() {
                 should_remove_bucket = true;
@@ -99,12 +101,6 @@ impl OperatorQueues {
             horizontal: DotQueue::default(),
             vertical: DotQueue::default(),
         }
-    }
-
-    fn same_call(dot1: &DotMachine, dot2: &DotMachine) -> bool {
-        let call1 = dot1.dot().callstack();
-        let call2 = dot2.dot().callstack();
-        call1 == call2
     }
 
     pub(super) fn push_and_get_result(&mut self, dot: DotMachine) -> Option<DotMachine> {

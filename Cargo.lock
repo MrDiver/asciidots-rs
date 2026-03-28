@@ -154,6 +154,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "asciidots-graph"
+version = "0.1.0"
+dependencies = [
+ "asciidots-core",
+ "rustc-hash",
+]
+
+[[package]]
 name = "asciidots-tui"
 version = "0.1.0"
 dependencies = [

@@ -9,12 +9,11 @@ pub enum ValueSelector {
 }
 
 #[derive(Debug, Clone)]
-pub struct CallStack {
-    last: Option<Position>,
-    overflow: Vec<Position>,
+pub struct CallStack<T> {
+    last: Option<T>,
+    overflow: Vec<T>,
 }
-
-impl CallStack {
+impl<T: Clone + Copy> CallStack<T> {
     fn new() -> Self {
         Self {
             last: None,
@@ -22,20 +21,20 @@ impl CallStack {
         }
     }
 
-    fn push(&mut self, pos: Position) {
+    fn push(&mut self, value: T) {
         if let Some(last_pos) = self.last {
             self.overflow.push(last_pos);
         }
-        self.last = Some(pos);
+        self.last = Some(value);
     }
 
-    fn pop(&mut self) -> Option<Position> {
+    fn pop(&mut self) -> Option<T> {
         let last_pos = self.last;
         self.last = self.overflow.pop();
         last_pos
     }
 
-    fn peek(&self) -> Option<Position> {
+    fn peek(&self) -> Option<T> {
         self.last
     }
 
@@ -47,12 +46,12 @@ impl CallStack {
         self.last.is_none()
     }
 
-    pub fn last(&self) -> Option<Position> {
+    pub fn last(&self) -> Option<T> {
         self.peek()
     }
 }
 
-impl PartialEq for CallStack {
+impl<T: PartialEq + Clone + Copy> PartialEq for CallStack<T> {
     fn eq(&self, other: &Self) -> bool {
         if let Some(site1) = self.last
             && let Some(site2) = other.last
@@ -64,6 +63,11 @@ impl PartialEq for CallStack {
     }
 }
 
+pub trait Callstackable<T> {
+    fn callstack(&self) -> &CallStack<T>;
+    fn callstack_mut(&mut self) -> &mut CallStack<T>;
+}
+
 #[derive(Debug, Clone)]
 pub struct Dot {
     direction: Direction,
@@ -72,7 +76,17 @@ pub struct Dot {
     addr: f64,
     uuid: u64,
     selector: ValueSelector,
-    callstack: CallStack,
+    callstack: CallStack<Position>,
+}
+
+impl Callstackable<Position> for Dot {
+    fn callstack(&self) -> &CallStack<Position> {
+        &self.callstack
+    }
+
+    fn callstack_mut(&mut self) -> &mut CallStack<Position> {
+        &mut self.callstack
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -197,7 +211,7 @@ impl Dot {
         Ok(())
     }
 
-    pub fn callstack(&self) -> &CallStack {
+    pub fn callstack(&self) -> &CallStack<Position> {
         &self.callstack
     }
 
