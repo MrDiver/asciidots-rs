@@ -16,6 +16,22 @@ pub struct AddrValue {
     selected: AddrValueSelector,
 }
 
+impl AddrValue {
+    pub fn addr(&self) -> f64 {
+        self.addr
+    }
+}
+
+impl Default for AddrValue {
+    fn default() -> Self {
+        Self {
+            addr: Default::default(),
+            value: Default::default(),
+            selected: AddrValueSelector::Value,
+        }
+    }
+}
+
 impl ValueSelector<AddrValueSelector, f64> for AddrValue {
     fn select(&mut self, k: AddrValueSelector) {
         self.selected = k;

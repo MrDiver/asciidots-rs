@@ -191,6 +191,40 @@ impl Operand<f64> for DotMachine {
 
 impl EngineDot for DotMachine {
     type Value = f64;
+    type CallstackKey = Position;
+
+    fn selected(&self) -> f64 {
+        self.dot.selected()
+    }
+
+    fn set_selected(&mut self, value: f64) {
+        self.dot.set_selected(value);
+    }
+
+    fn addr(&self) -> f64 {
+        self.dot.addr()
+    }
+
+    fn current_location(&self) -> Position {
+        *self.dot.position()
+    }
+
+    fn callstack_key_from_addr(&self) -> Position {
+        let addr = self.dot.addr();
+        if addr.is_finite() {
+            Position::new(addr as i32, addr as i32)
+        } else {
+            Position::default()
+        }
+    }
+
+    fn pop_callstack(&mut self) -> Option<Position> {
+        self.dot.pop_callstack()
+    }
+
+    fn push_callstack(&mut self, key: Position) {
+        self.dot.push_callstack(key);
+    }
 }
 
 impl std::fmt::Display for DotMachine {

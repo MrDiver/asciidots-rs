@@ -2,3 +2,4 @@ target/
 samples/superbig.dots
 .idea/
 .vscode/
+.claude/

@@ -96,7 +96,7 @@ pub enum ExecutionBackend {
 }
 
 pub struct DotsInterpreterBuilder {
-    native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    native_registry: FxHashMap<String, Box<dyn NativeFunction<DotMachine>>>,
     execution_backend: ExecutionBackend,
 }
 
@@ -114,7 +114,10 @@ impl DotsInterpreterBuilder {
         builder
     }
 
-    pub fn register_native_function(&mut self, function: Box<dyn NativeFunction>) -> &mut Self {
+    pub fn register_native_function(
+        &mut self,
+        function: Box<dyn NativeFunction<DotMachine>>,
+    ) -> &mut Self {
         let name = function.name().to_string();
         self.native_registry.insert(name, function);
         self
@@ -147,7 +150,7 @@ impl Default for DotsInterpreterBuilder {
 pub struct DotsInterpreter {
     field: AsciiField,
     functions: Vec<FunctionDefinition>,
-    native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+    native_registry: FxHashMap<String, Box<dyn NativeFunction<DotMachine>>>,
     execution_backend: ExecutionBackend,
     native_returned_dots: Vec<DotMachine>,
     dots: Vec<DotMachine>,
@@ -186,7 +189,7 @@ impl DotsInterpreter {
     fn from_linked(
         module: DotsModule,
         native_imports: impl IntoIterator<Item = (String, String)>,
-        native_registry: FxHashMap<String, Box<dyn NativeFunction>>,
+        native_registry: FxHashMap<String, Box<dyn NativeFunction<DotMachine>>>,
         execution_backend: ExecutionBackend,
     ) -> Self {
         let (mut field, functions) = module.unpack();
@@ -265,14 +268,7 @@ impl DotsInterpreter {
                     ] {
                         let offsetpos = position + (*direction).into();
                         match self.field.at(&offsetpos) {
-                            AsciiCell::Pipe(orientation)
-                                if *orientation == direction.orientation() =>
-                            {
-                                self.dots
-                                    .push(DotMachine::new(*direction, position.x, position.y));
-                                break;
-                            }
-                            AsciiCell::CrossPipe | AsciiCell::Mirror(_) => {
+                            c if c.can_initialize(&direction.orientation()) => {
                                 self.dots
                                     .push(DotMachine::new(*direction, position.x, position.y));
                                 break;
@@ -370,17 +366,25 @@ impl DotsInterpreter {
                     let lookahead = self.field.at_spanned(dot.position());
                     dot.next(&MachineEvent::Nothing, lookahead)
                 }
-                MachineEvent::Display { display_id, direction, addr, value } => {
+                MachineEvent::Display {
+                    display_id,
+                    direction,
+                    addr,
+                    value,
+                } => {
                     let command = match direction {
                         Direction::Right => DisplayCommand::SetWidth(value.round() as usize),
-                        Direction::Up    => DisplayCommand::SetHeight(value.round() as usize),
-                        Direction::Left  => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
-                        Direction::Down  => DisplayCommand::SetPixel {
+                        Direction::Up => DisplayCommand::SetHeight(value.round() as usize),
+                        Direction::Left => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
+                        Direction::Down => DisplayCommand::SetPixel {
                             index: addr as usize,
                             value,
                         },
                     };
-                    self.results.push(InterpreterResult::Display { display_id, command });
+                    self.results.push(InterpreterResult::Display {
+                        display_id,
+                        command,
+                    });
                     if direction == Direction::Down {
                         let dot = &mut self.dots[i];
                         dot.dot_mut().set_dir(Direction::Up).step();
@@ -428,11 +432,12 @@ impl DotsInterpreter {
                                 native_fun.dot_enter(dot);
                                 repeat_iteration = true;
                             } else {
-                                self.diagnostics
-                                    .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                                self.diagnostics.push(
+                                    RuntimeDiagnostic::MissingFunctionDefinition {
                                         name: format!("#{call_id}"),
                                         span: self.field.at_spanned(dot.position()).span(),
-                                    });
+                                    },
+                                );
                             }
                         }
                         None => {

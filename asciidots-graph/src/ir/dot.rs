@@ -8,7 +8,7 @@ use asciidots_core::{
     primitives::{Directed, Direction, Orientation, Oriented},
 };
 
-use crate::{
+use crate::ir::{
     graph::NodeId,
     selector::{AddrValue, ValueSelector},
 };
@@ -21,6 +21,36 @@ pub struct GraphDot {
 
 impl EngineDot for GraphDot {
     type Value = f64;
+    type CallstackKey = NodeId;
+
+    fn selected(&self) -> f64 {
+        self.value.get()
+    }
+
+    fn set_selected(&mut self, value: f64) {
+        self.value.set(value);
+        self.value.reset_selection();
+    }
+
+    fn addr(&self) -> f64 {
+        self.value.addr()
+    }
+
+    fn current_location(&self) -> NodeId {
+        0 // TODO: track current node
+    }
+
+    fn callstack_key_from_addr(&self) -> NodeId {
+        self.value.addr() as NodeId
+    }
+
+    fn pop_callstack(&mut self) -> Option<NodeId> {
+        self.callstack.pop()
+    }
+
+    fn push_callstack(&mut self, key: NodeId) {
+        self.callstack.push(&key);
+    }
 }
 
 impl Directed for GraphDot {
@@ -35,11 +65,7 @@ impl Directed for GraphDot {
 
 impl IsTrue for GraphDot {
     fn is_true(&self) -> bool {
-        if self.value.get().abs() < f64::EPSILON {
-            false
-        } else {
-            true
-        }
+        self.value.get().abs() >= f64::EPSILON
     }
 }
 

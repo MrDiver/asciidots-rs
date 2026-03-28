@@ -103,6 +103,20 @@ pub enum AsciiCell {
     Assertion, // Standalone =, Can be used for assertions which throw an error if not met, but otherwise do nothing.
 }
 
+impl AsciiCell {
+    pub fn can_initialize(&self, orientation: &Orientation) -> bool {
+        match self {
+            AsciiCell::Mirror(_)
+            | AsciiCell::CrossPipe
+            | AsciiCell::Duplicate
+            | AsciiCell::ForceDirection(_) => true,
+            AsciiCell::Pipe(o) => o == orientation,
+            AsciiCell::Reflector(_) => *orientation == Orientation::Horizontal,
+            _ => false,
+        }
+    }
+}
+
 impl std::fmt::Display for AsciiCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

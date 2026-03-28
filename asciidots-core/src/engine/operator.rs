@@ -82,6 +82,7 @@ pub trait DotValue:
     fn bitand(self, other: Self) -> Self;
     fn bitor(self, other: Self) -> Self;
     fn bitxor(self, other: Self) -> Self;
+    fn is_finite(self) -> bool;
 }
 
 impl DotValue for f64 {
@@ -99,6 +100,9 @@ impl DotValue for f64 {
     }
     fn bitxor(self, other: Self) -> Self {
         (self as u64 ^ other as u64) as f64
+    }
+    fn is_finite(self) -> bool {
+        f64::is_finite(self)
     }
 }
 

@@ -3,15 +3,35 @@ use asciidots_core::{
     primitives::Position,
 };
 
-use crate::dot::GraphDot;
+use crate::ir::dot::GraphDot;
 
 pub type NodeId = usize;
 
+pub enum PrintKind {
+    Normal(String),
+    Stream(String),
+    Addr,
+    Value,
+}
+
+pub enum SetKind {
+    Input,
+    Addr(f64),
+    Value(f64),
+}
+
+pub enum CallKind {
+    NativeCall(String),
+    AsciiCall(String),
+}
+
 pub enum NodeType {
-    Print(String),
-    PrintStream(String),
+    Print(PrintKind),
+    Set(SetKind),
     Duplicate,
     Dead,
+    Call(CallKind),
+    Return,
     Operator(Operator<GraphDot, f64>),
     Conditonal(ConditionalOperator<GraphDot>),
 }
@@ -19,6 +39,12 @@ pub enum NodeType {
 pub struct Node {
     position: Position,
     t: NodeType,
+}
+
+impl Node {
+    pub fn new(position: Position, t: NodeType) -> Self {
+        Self { position, t }
+    }
 }
 
 pub enum PortType {

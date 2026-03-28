@@ -16,7 +16,7 @@ struct SinNative {
     queued: Vec<DotMachine>,
 }
 
-impl NativeFunction for SinNative {
+impl NativeFunction<DotMachine> for SinNative {
     fn name(&self) -> &str {
         "sin"
     }
@@ -109,7 +109,8 @@ fn native_sin_values_trace_current_behavior() {
 
 #[test]
 fn scope_fixture_runs_to_completion() {
-    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scope_test.dots");
+    let fixture_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scope_test.dots");
     let mut interpreter = DotsInterpreterBuilder::new()
         .build_from_file(&fixture_path)
         .expect("scope fixture should link and initialize");
@@ -118,7 +119,10 @@ fn scope_fixture_runs_to_completion() {
     let mut ticks = 0usize;
 
     while !interpreter.is_finished() {
-        assert!(ticks < max_ticks, "scope fixture did not halt within {max_ticks} ticks");
+        assert!(
+            ticks < max_ticks,
+            "scope fixture did not halt within {max_ticks} ticks"
+        );
         let step_result = interpreter.step();
         assert!(
             step_result.is_ok(),
@@ -151,8 +155,13 @@ fn display_fixture_emits_correct_events() {
     let mut pixel_values: Vec<f64> = Vec::new();
 
     while !interpreter.is_finished() {
-        assert!(ticks < max_ticks, "display fixture did not halt within {max_ticks} ticks");
-        let results = interpreter.step().expect("display fixture should not error");
+        assert!(
+            ticks < max_ticks,
+            "display fixture did not halt within {max_ticks} ticks"
+        );
+        let results = interpreter
+            .step()
+            .expect("display fixture should not error");
         for result in results {
             if let InterpreterResult::Display { command, .. } = result {
                 match command {
@@ -168,8 +177,16 @@ fn display_fixture_emits_correct_events() {
 
     assert_eq!(set_width, Some(10), "expected SetWidth(10)");
     assert!(color_mode_set, "expected at least one SetColorMode command");
-    assert!(!pixel_values.is_empty(), "expected at least one SetPixel command");
-    println!("display fixture: width={:?}, {} pixels, values={:?}", set_width, pixel_values.len(), pixel_values);
+    assert!(
+        !pixel_values.is_empty(),
+        "expected at least one SetPixel command"
+    );
+    println!(
+        "display fixture: width={:?}, {} pixels, values={:?}",
+        set_width,
+        pixel_values.len(),
+        pixel_values
+    );
 }
 
 #[test]
@@ -187,10 +204,17 @@ fn juliaset_small_emits_display_events() {
     let mut set_height: Option<usize> = None;
 
     while !interpreter.is_finished() {
-        assert!(ticks < max_ticks, "juliaset_small did not halt within {max_ticks} ticks");
+        assert!(
+            ticks < max_ticks,
+            "juliaset_small did not halt within {max_ticks} ticks"
+        );
         let results = interpreter.step().expect("juliaset_small should not error");
         for result in results {
-            if let InterpreterResult::Display { display_id, command } = result {
+            if let InterpreterResult::Display {
+                display_id,
+                command,
+            } = result
+            {
                 println!("[tick={ticks}] id={display_id} {command:?}");
                 match command {
                     DisplayCommand::SetWidth(w) => set_width = Some(*w),
@@ -203,8 +227,22 @@ fn juliaset_small_emits_display_events() {
         ticks += 1;
     }
 
-    assert!(set_width.is_some(), "expected at least one SetWidth display command");
-    assert!(set_height.is_some(), "expected at least one SetHeight display command");
-    assert!(set_pixel_count > 0, "expected at least one SetPixel display command, got 0");
-    println!("Display: {}x{}, {} pixels drawn", set_width.unwrap(), set_height.unwrap(), set_pixel_count);
+    assert!(
+        set_width.is_some(),
+        "expected at least one SetWidth display command"
+    );
+    assert!(
+        set_height.is_some(),
+        "expected at least one SetHeight display command"
+    );
+    assert!(
+        set_pixel_count > 0,
+        "expected at least one SetPixel display command, got 0"
+    );
+    println!(
+        "Display: {}x{}, {} pixels drawn",
+        set_width.unwrap(),
+        set_height.unwrap(),
+        set_pixel_count
+    );
 }
