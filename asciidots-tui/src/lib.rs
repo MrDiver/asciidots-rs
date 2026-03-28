@@ -1,4 +1,9 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock, mpsc},
+    thread,
+    time::{Duration, Instant},
+};
 
 use asciidots_core::display::DisplayBackend;
 use asciidots_core::interpreter::InterpreterResult;
@@ -14,7 +19,6 @@ use crossterm::event::{
     EnableMouseCapture, DisableMouseCapture,
 };
 use rustc_hash::FxHashMap;
-use std::sync::{Arc, RwLock};
 use std::io::stdout;
 use miette::NamedSource;
 use ratatui::widgets::Paragraph;
@@ -918,7 +922,7 @@ impl DotsView for RatatuiView {
     }
 
     fn poll_command(&mut self) -> Option<AppCommand> {
-        if event::poll(Duration::from_millis(1)).unwrap() {
+        if event::poll(Duration::ZERO).unwrap() {
             match event::read().unwrap() {
                 Event::Key(event) => self.handle_key_event(&event),
                 Event::Mouse(mouse) => {
@@ -942,52 +946,140 @@ impl DotsView for RatatuiView {
     }
 }
 
-pub fn run(content: &str) -> miette::Result<()> {
-    let mut app = RuntimeController::new(content)
-        .map_err(|e| e.with_source_code(NamedSource::new("Source", content.to_string())))?;
-    let mut view = RatatuiView::new();
+// ─── Interpreter thread ───────────────────────────────────────────────────────
+
+fn interpreter_thread(
+    shared: Arc<RwLock<RuntimeController>>,
+    cmd_rx: mpsc::Receiver<AppCommand>,
+    result_tx: mpsc::Sender<Vec<InterpreterResult>>,
+) {
     loop {
-        let command = view.poll_command();
-        if let Some(c) = command {
-            if matches!(c, AppCommand::StopProgram) {
+        // Process any pending commands before stepping.
+        let mut stop = false;
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            if matches!(cmd, AppCommand::StopProgram) {
+                stop = true;
                 break;
             }
-            if matches!(c, AppCommand::Reset) {
-                view.clear_output();
+            let results = shared.write().unwrap().handle_command(cmd);
+            if !results.is_empty() && result_tx.send(results).is_err() {
+                return;
             }
-            let results = app.handle_command(c);
-            view.process_results(&results);
         }
-        if matches!(view.mode, ViewMode::Normal) {
-            let results = app.tick();
-            view.process_results(&results);
+        if stop {
+            break;
         }
-        view.render(&app)
+
+        // Run steps for at most 2 ms, then release the lock so the UI thread
+        // can always get a read lock within that window.
+        let results = shared.write().unwrap().tick_budgeted(Duration::from_millis(2));
+
+        if results.is_empty() {
+            // Not running or tick_speed hasn't elapsed yet — avoid busy-spin.
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        }
+
+        let needs_input = results
+            .iter()
+            .any(|r| matches!(r, InterpreterResult::InputRequest(_)));
+
+        if result_tx.send(results).is_err() {
+            break;
+        }
+
+        if needs_input {
+            // Block until InputAnswer (or Stop/Reset) so we don't busy-loop.
+            loop {
+                let cmd = match cmd_rx.recv() {
+                    Ok(cmd) => cmd,
+                    Err(_) => return,
+                };
+                let is_answer = matches!(cmd, AppCommand::InputAnswer(..));
+                let is_stop = matches!(cmd, AppCommand::StopProgram);
+                let results = shared.write().unwrap().handle_command(cmd);
+                if !results.is_empty() {
+                    result_tx.send(results).ok();
+                }
+                if is_stop {
+                    return;
+                }
+                if is_answer {
+                    break;
+                }
+            }
+        }
     }
-    Ok(())
+}
+
+// ─── Shared main-loop helper ──────────────────────────────────────────────────
+
+fn run_with_controller(
+    controller: RuntimeController,
+    display_mode: TuiDisplayMode,
+) -> miette::Result<()> {
+    let shared: Arc<RwLock<RuntimeController>> = Arc::new(RwLock::new(controller));
+
+    let (cmd_tx, cmd_rx) = mpsc::channel::<AppCommand>();
+    let (result_tx, result_rx) = mpsc::channel::<Vec<InterpreterResult>>();
+
+    let interp_shared = Arc::clone(&shared);
+    let _interp = thread::spawn(move || {
+        interpreter_thread(interp_shared, cmd_rx, result_tx);
+    });
+
+    let mut view = RatatuiView::with_display_mode(display_mode);
+    let frame_budget = Duration::from_millis(16); // ~60 fps cap
+
+    loop {
+        let frame_start = Instant::now();
+
+        // Drain all results the interpreter produced since last frame.
+        while let Ok(results) = result_rx.try_recv() {
+            view.process_results(&results);
+        }
+
+        // Handle all pending UI events (non-blocking).
+        loop {
+            match view.poll_command() {
+                None => break,
+                Some(AppCommand::StopProgram) => {
+                    cmd_tx.send(AppCommand::StopProgram).ok();
+                    return Ok(());
+                }
+                Some(AppCommand::Reset) => {
+                    view.clear_output();
+                    cmd_tx.send(AppCommand::Reset).ok();
+                }
+                Some(cmd) => {
+                    cmd_tx.send(cmd).ok();
+                }
+            }
+        }
+
+        // Render — takes a read lock; interpreter is free to write between frames.
+        {
+            let ctrl = shared.read().unwrap();
+            view.render(&ctrl);
+        }
+
+        // Sleep out the rest of the frame budget so we don't burn CPU at idle.
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_budget {
+            thread::sleep(frame_budget - elapsed);
+        }
+    }
+}
+
+// ─── Public entry points ──────────────────────────────────────────────────────
+
+pub fn run(content: &str) -> miette::Result<()> {
+    let controller = RuntimeController::new(content)
+        .map_err(|e| e.with_source_code(NamedSource::new("Source", content.to_string())))?;
+    run_with_controller(controller, TuiDisplayMode::Ratatui)
 }
 
 pub fn run_file(path: impl AsRef<Path>, display_mode: TuiDisplayMode) -> miette::Result<()> {
-    let path_ref = path.as_ref();
-    let mut app = RuntimeController::new_from_file(path_ref)?;
-    let mut view = RatatuiView::with_display_mode(display_mode);
-    loop {
-        let command = view.poll_command();
-        if let Some(c) = command {
-            if matches!(c, AppCommand::StopProgram) {
-                break;
-            }
-            if matches!(c, AppCommand::Reset) {
-                view.clear_output();
-            }
-            let results = app.handle_command(c);
-            view.process_results(&results);
-        }
-        if matches!(view.mode, ViewMode::Normal) {
-            let results = app.tick();
-            view.process_results(&results);
-        }
-        view.render(&app)
-    }
-    Ok(())
+    let controller = RuntimeController::new_from_file(path.as_ref())?;
+    run_with_controller(controller, display_mode)
 }

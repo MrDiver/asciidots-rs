@@ -138,6 +138,35 @@ impl RuntimeController {
         Vec::new()
     }
 
+    /// Like [`tick`] but releases early if `budget` elapses, so callers that
+    /// hold a lock can give other threads a chance to run.  `steps_per_frame`
+    /// still acts as an upper bound on the number of steps per call.
+    pub fn tick_budgeted(&mut self, budget: Duration) -> Vec<InterpreterResult> {
+        if !self.running || self.clock.elapsed() < self.tick_speed {
+            return Vec::new();
+        }
+        self.clock = Instant::now();
+        let deadline = Instant::now() + budget;
+        let mut all_results = Vec::new();
+        for _ in 0..self.steps_per_frame {
+            if self.interpreter.is_finished() || Instant::now() >= deadline {
+                break;
+            }
+            let start = Instant::now();
+            let results = self.interpreter.step().unwrap().to_vec();
+            self.last_step_duration = start.elapsed();
+            self.tick_count += 1;
+            let needs_input = results.iter().any(|r| {
+                matches!(r, InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram)
+            });
+            all_results.extend(results);
+            if needs_input {
+                break;
+            }
+        }
+        all_results
+    }
+
     pub fn handle_command(&mut self, command: AppCommand) -> Vec<InterpreterResult> {
         match command {
             AppCommand::Step => return self.run_steps(1),
@@ -194,7 +223,7 @@ impl RuntimeController {
         )
     }
 
-    pub fn dot_debug_table_model(&self) -> DotDebugTableModel {
+    pub fn dot_debug_table_model(&self) -> DotDebugTableModel<'_> {
         DotDebugTableModel::from_dots(
             self.interpreter.get_dots(),
             self.interpreter.queues().values().flat_map(|queue| queue.dots()),

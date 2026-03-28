@@ -2,9 +2,35 @@ use std::time::Duration;
 
 use crate::presentation::model_traits::{TableCell, TableCellKind, TableModel};
 
+const HEADERS: [&str; 2] = ["Setting", "Value"];
+
+// Row 0-5 are runtime stats; rows 6+ are static key-binding hints.
+const HINTS: &[(&str, &str)] = &[
+    ("Space", "Run/Pause"),
+    ("n", "Single Step"),
+    ("r", "Reset"),
+    ("j / k", "Delay +/-10 ms"),
+    ("u / i", "Steps/Tick -/+1"),
+    ("↑ / ↓", "Output Scroll"),
+    ("PgUp/PgDn", "Output Scroll +/-10"),
+    ("wasd", "Scroll Map"),
+    ("[ / ]", "Left Panel Width"),
+    ("- / =", "Side Split"),
+    ("Tab", "Switch Tab"),
+    ("Esc", "Quit"),
+];
+
+const STAT_ROWS: usize = 6;
+
+/// Lazy settings model — stores raw values and computes cells on demand.
+/// No heap allocation at construction time.
 pub struct SettingsTableModel {
-    headers: [String; 2],
-    rows: Vec<[TableCell; 2]>,
+    running: bool,
+    tick_speed: Duration,
+    steps_per_tick: usize,
+    tick_count: usize,
+    last_step_duration: Duration,
+    num_dots: usize,
 }
 
 impl SettingsTableModel {
@@ -14,110 +40,83 @@ impl SettingsTableModel {
         steps_per_tick: usize,
         tick_count: usize,
         last_step_duration: Duration,
-        dots: usize,
+        num_dots: usize,
     ) -> Self {
-        let running_value = if running { "Yes" } else { "No" };
-        let running_cell = TableCell::new(
-            running_value,
-            if running {
-                TableCellKind::Active
-            } else {
-                TableCellKind::Default
-            },
-        )
-        .with_bold(true);
-
-        let rows = vec![
-            [
-                TableCell::new("Num Dots", TableCellKind::Changeable).with_bold(true),
-                TableCell::new(
-                    format!("{}", dots),
-                    TableCellKind::Default,
-                ),
-
-            ],
-            [
-                TableCell::new("Running", TableCellKind::Changeable).with_bold(true),
-                running_cell,
-            ],
-            [
-                TableCell::new("Tick Speed", TableCellKind::Changeable),
-                TableCell::new(
-                    format!("{} ms", tick_speed.as_millis()),
-                    TableCellKind::Default,
-                ),
-            ],
-            [
-                TableCell::new("Steps/Tick", TableCellKind::Changeable),
-                TableCell::new(format!("{steps_per_tick}"), TableCellKind::Default),
-            ],
-            [
-                TableCell::new("Ticks", TableCellKind::Changeable),
-                TableCell::new(format!("{tick_count}"), TableCellKind::Changing),
-            ],
-            [
-                TableCell::new("Last Step", TableCellKind::Changeable),
-                TableCell::new(format!("{:?}", last_step_duration), TableCellKind::Default),
-            ],
-            [
-                TableCell::new("Space", TableCellKind::Quote),
-                TableCell::new("Run/Pause", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("n", TableCellKind::Quote),
-                TableCell::new("Single Step", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("r", TableCellKind::Quote),
-                TableCell::new("Reset", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("j / k", TableCellKind::Quote),
-                TableCell::new("Delay +/-10 ms", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("u / i", TableCellKind::Quote),
-                TableCell::new("Steps/Tick -/+1", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("↑ / ↓", TableCellKind::Quote),
-                TableCell::new("Output Scroll", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("PgUp/PgDn", TableCellKind::Quote),
-                TableCell::new("Output Scroll +/-10", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("wasd", TableCellKind::Quote),
-                TableCell::new("Scroll", TableCellKind::Default),
-            ],
-            [
-                TableCell::new("Esc", TableCellKind::Quote),
-                TableCell::new("Quit", TableCellKind::Default).with_strikethrough(false),
-            ],
-        ];
-
         Self {
-            headers: ["Setting".to_string(), "Value".to_string()],
-            rows,
+            running,
+            tick_speed,
+            steps_per_tick,
+            tick_count,
+            last_step_duration,
+            num_dots,
         }
     }
 }
 
 impl TableModel for SettingsTableModel {
     fn row_count(&self) -> usize {
-        self.rows.len()
+        STAT_ROWS + HINTS.len()
     }
 
     fn column_count(&self) -> usize {
-        self.headers.len()
+        2
     }
 
     fn header(&self, column: usize) -> Option<&str> {
-        self.headers.get(column).map(|value| value.as_str())
+        HEADERS.get(column).copied()
     }
 
     fn get_cell(&self, row: usize, column: usize) -> Option<TableCell> {
-        self.rows.get(row).and_then(|line| line.get(column)).cloned()
+        if column > 1 {
+            return None;
+        }
+
+        // ── Runtime stats (rows 0-5) ──────────────────────────────────────────
+        if row < STAT_ROWS {
+            return Some(match (row, column) {
+                (0, 0) => TableCell::new("Num Dots", TableCellKind::Changeable).with_bold(true),
+                (0, 1) => TableCell::new(format!("{}", self.num_dots), TableCellKind::Default),
+                (1, 0) => TableCell::new("Running", TableCellKind::Changeable).with_bold(true),
+                (1, 1) => TableCell::new(
+                    if self.running { "Yes" } else { "No" },
+                    if self.running {
+                        TableCellKind::Active
+                    } else {
+                        TableCellKind::Default
+                    },
+                )
+                .with_bold(true),
+                (2, 0) => TableCell::new("Tick Speed", TableCellKind::Changeable),
+                (2, 1) => TableCell::new(
+                    format!("{} ms", self.tick_speed.as_millis()),
+                    TableCellKind::Default,
+                ),
+                (3, 0) => TableCell::new("Steps/Tick", TableCellKind::Changeable),
+                (3, 1) => TableCell::new(
+                    format!("{}", self.steps_per_tick),
+                    TableCellKind::Default,
+                ),
+                (4, 0) => TableCell::new("Ticks", TableCellKind::Changeable),
+                (4, 1) => TableCell::new(
+                    format!("{}", self.tick_count),
+                    TableCellKind::Changing,
+                ),
+                (5, 0) => TableCell::new("Last Step", TableCellKind::Changeable),
+                (5, 1) => TableCell::new(
+                    format!("{:?}", self.last_step_duration),
+                    TableCellKind::Default,
+                ),
+                _ => return None,
+            });
+        }
+
+        // ── Key-binding hints (rows 6+) ───────────────────────────────────────
+        let hint_row = row - STAT_ROWS;
+        let (key, action) = HINTS.get(hint_row)?;
+        Some(match column {
+            0 => TableCell::new(*key, TableCellKind::Quote),
+            1 => TableCell::new(*action, TableCellKind::Default),
+            _ => return None,
+        })
     }
 }

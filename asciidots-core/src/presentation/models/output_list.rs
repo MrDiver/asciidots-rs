@@ -49,40 +49,42 @@ pub fn apply_result_to_output(
     }
 }
 
-pub struct OutputListModel {
-    items: Vec<ListCell>,
+/// Lazy output model — borrows the entries slice and only clones visible items
+/// when [`ListModel::get_item`] is called. Building is O(1).
+pub struct OutputListModel<'a> {
+    entries: &'a [OutputEntry],
+    current_line: &'a str,
 }
 
-impl OutputListModel {
-    pub fn from_output(entries: &[OutputEntry], current_line: &str) -> Self {
-        let mut items = entries
-            .iter()
-            .map(|entry| {
-                let mut cell = ListCell::new(entry.text.clone(), entry.kind);
-                if matches!(entry.kind, ListCellKind::Changeable) {
-                    cell = cell.with_bold(true);
-                }
-                cell
-            })
-            .collect::<Vec<_>>();
-
-        if !current_line.is_empty() {
-            items.push(ListCell::new(
-                current_line.to_string(),
-                ListCellKind::Active,
-            ));
+impl<'a> OutputListModel<'a> {
+    pub fn from_output(entries: &'a [OutputEntry], current_line: &'a str) -> Self {
+        Self {
+            entries,
+            current_line,
         }
-
-        Self { items }
     }
 }
 
-impl ListModel for OutputListModel {
+impl ListModel for OutputListModel<'_> {
     fn item_count(&self) -> usize {
-        self.items.len()
+        self.entries.len() + usize::from(!self.current_line.is_empty())
     }
 
     fn get_item(&self, index: usize) -> Option<ListCell> {
-        self.items.get(index).cloned()
+        if index < self.entries.len() {
+            let entry = &self.entries[index];
+            let mut cell = ListCell::new(entry.text.clone(), entry.kind);
+            if matches!(entry.kind, ListCellKind::Changeable) {
+                cell = cell.with_bold(true);
+            }
+            Some(cell)
+        } else if index == self.entries.len() && !self.current_line.is_empty() {
+            Some(ListCell::new(
+                self.current_line.to_string(),
+                ListCellKind::Active,
+            ))
+        } else {
+            None
+        }
     }
 }
