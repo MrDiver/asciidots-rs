@@ -1,6 +1,6 @@
-use asciidots_core::primitives::{Directed, Oriented};
+use crate::primitives::{Directed, Oriented};
 
-use crate::{
+use super::{
     operator::{DotValue, Operand},
     queues::Pairable,
 };

@@ -1,12 +1,9 @@
-use asciidots_core::primitives::{Direction, Orientation, Oriented, Position};
-
-use crate::{
-    callstack::Callstack,
-    dot::GraphDot,
-    operator::{ConditionalOperator, Operand, Operator, OperatorPair, OperatorQueue},
-    queues::Pairable,
-    selector::{AddrValue, ValueSelector},
+use asciidots_core::{
+    engine::operator::{ConditionalOperator, Operator},
+    primitives::Position,
 };
+
+use crate::dot::GraphDot;
 
 pub type NodeId = usize;
 

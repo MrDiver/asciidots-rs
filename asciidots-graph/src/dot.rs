@@ -1,11 +1,15 @@
-use asciidots_core::primitives::{Directed, Direction, Orientation, Oriented};
+use asciidots_core::{
+    engine::{
+        callstack::Callstack,
+        dot_trait::{EngineDot, IsTrue},
+        operator::Operand,
+        queues::Pairable,
+    },
+    primitives::{Directed, Direction, Orientation, Oriented},
+};
 
 use crate::{
-    callstack::Callstack,
-    dot_trait::{EngineDot, IsTrue},
     graph::NodeId,
-    operator::Operand,
-    queues::Pairable,
     selector::{AddrValue, ValueSelector},
 };
 

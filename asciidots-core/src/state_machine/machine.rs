@@ -1,7 +1,13 @@
 use crate::{
+    engine::{
+        callstack::{Callstack, Callstackable},
+        dot_trait::{EngineDot, IsTrue},
+        operator::Operand,
+        queues::Pairable,
+    },
     parser::{AsciiCell, SpanToken},
-    primitives::{Direction, Position},
-    state_machine::{Callstackable, ValueSelector},
+    primitives::{Directed, Direction, Orientation, Oriented, Position},
+    state_machine::ValueSelector,
 };
 
 use super::dot::Dot;
@@ -137,13 +143,53 @@ impl DotMachine {
 }
 
 impl Callstackable<Position> for DotMachine {
-    fn callstack(&self) -> &super::CallStack<Position> {
+    fn callstack(&self) -> &Callstack<Position> {
         self.dot().callstack()
     }
 
-    fn callstack_mut(&mut self) -> &mut super::CallStack<Position> {
+    fn callstack_mut(&mut self) -> &mut Callstack<Position> {
         self.dot_mut().callstack_mut()
     }
+}
+
+impl Directed for DotMachine {
+    fn direction(&self) -> Direction {
+        self.dot.direction()
+    }
+
+    fn set_direction(&mut self, direction: Direction) {
+        self.dot.set_dir(direction);
+    }
+}
+
+impl Oriented for DotMachine {
+    fn orientation(&self) -> Orientation {
+        self.dot.orientation()
+    }
+}
+
+impl IsTrue for DotMachine {
+    fn is_true(&self) -> bool {
+        self.dot.selected() as u64 != 0
+    }
+}
+
+impl Pairable for DotMachine {
+    fn key(&self) -> u64 {
+        self.dot.callstack().current_hash()
+    }
+}
+
+impl Operand<f64> for DotMachine {
+    fn apply_operator(mut self, other: Self, op: impl Fn(f64, f64) -> f64) -> Self {
+        let result = op(self.dot.selected(), other.dot.selected());
+        self.dot.set_selected(result);
+        self
+    }
+}
+
+impl EngineDot for DotMachine {
+    type Value = f64;
 }
 
 impl std::fmt::Display for DotMachine {

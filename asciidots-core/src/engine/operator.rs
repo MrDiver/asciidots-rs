@@ -1,14 +1,13 @@
 use std::ops::{Add, Div, Mul, Rem, Sub};
 
-use asciidots_core::primitives::{Direction, Orientation, Oriented};
+use crate::primitives::{Orientation, Oriented};
 
-use crate::{
-    dot::GraphDot,
+use super::{
     dot_trait::EngineDot,
     queues::{Pairable, PairingQueue},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OperatorQueue<T: Pairable> {
     horizontal: PairingQueue<T>,
     vertical: PairingQueue<T>,
@@ -16,11 +15,28 @@ pub struct OperatorQueue<T: Pairable> {
 
 #[derive(Debug)]
 pub struct OperatorPair<T> {
-    horizontal: T,
-    vertical: T,
+    pub horizontal: T,
+    pub vertical: T,
+}
+
+impl<T: Pairable> Default for OperatorQueue<T> {
+    fn default() -> Self {
+        Self {
+            horizontal: PairingQueue::default(),
+            vertical: PairingQueue::default(),
+        }
+    }
 }
 
 impl<T: Pairable> OperatorQueue<T> {
+    pub fn len(&self) -> usize {
+        self.horizontal.len() + self.vertical.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.horizontal.iter().chain(self.vertical.iter())
+    }
+
     pub fn push_horizontal_match_vertical(&mut self, value: T) -> Option<OperatorPair<T>> {
         if let Some(matched) = self.vertical.find_match(&value) {
             Some(OperatorPair {
@@ -58,8 +74,8 @@ pub trait DotValue:
     + Copy
 {
     fn pow(self, other: Self) -> Self;
-    fn bool_val(b: bool) -> Self; // returns 1.0/0.0 equivalent
-    fn bitand(self, other: Self) -> Self; // cast to u64, and, cast back
+    fn bool_val(b: bool) -> Self;
+    fn bitand(self, other: Self) -> Self;
     fn bitor(self, other: Self) -> Self;
     fn bitxor(self, other: Self) -> Self;
 }
@@ -90,10 +106,10 @@ pub struct Operator<T, V: DotValue>
 where
     T: Oriented + Pairable + Operand<V>,
 {
-    c: char,
-    queue: OperatorQueue<T>,
-    kind: Orientation,
-    _marker: std::marker::PhantomData<V>,
+    pub c: char,
+    pub queue: OperatorQueue<T>,
+    pub kind: Orientation,
+    pub _marker: std::marker::PhantomData<V>,
 }
 
 impl<T, V> Operator<T, V>
@@ -135,7 +151,8 @@ where
 }
 
 pub struct ConditionalOperator<T: EngineDot> {
-    queue: OperatorQueue<T>,
+    pub queue: OperatorQueue<T>,
+    pub negated: bool,
 }
 
 impl<T: EngineDot> ConditionalOperator<T> {
@@ -147,8 +164,13 @@ impl<T: EngineDot> ConditionalOperator<T> {
             Orientation::Horizontal => self.queue.push_horizontal_match_vertical(dot),
             Orientation::Vertical => self.queue.push_vertical_match_horizontal(dot),
         }?;
-        if vertical.is_true() {
-            horizontal.set_direction(Direction::Up);
+        let redirect_up = if self.negated {
+            !vertical.is_true()
+        } else {
+            vertical.is_true()
+        };
+        if redirect_up {
+            horizontal.set_direction(crate::primitives::Direction::Up);
         }
         Some(horizontal)
     }

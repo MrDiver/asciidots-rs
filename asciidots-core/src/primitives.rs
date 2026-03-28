@@ -49,7 +49,7 @@ pub trait Directed {
     fn set_direction(&mut self, direction: Direction);
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub struct Position {
     pub x: i32,
     pub y: i32,

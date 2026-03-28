@@ -1,71 +1,14 @@
 use std::cell::RefCell;
 
-use crate::primitives::{Direction, Orientation, Position};
+use crate::{
+    engine::callstack::{Callstack, Callstackable},
+    primitives::{Direction, Orientation, Position},
+};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ValueSelector {
     Addr,
     Value,
-}
-
-#[derive(Debug, Clone)]
-pub struct CallStack<T> {
-    last: Option<T>,
-    overflow: Vec<T>,
-}
-impl<T: Clone + Copy> CallStack<T> {
-    fn new() -> Self {
-        Self {
-            last: None,
-            overflow: Vec::default(),
-        }
-    }
-
-    fn push(&mut self, value: T) {
-        if let Some(last_pos) = self.last {
-            self.overflow.push(last_pos);
-        }
-        self.last = Some(value);
-    }
-
-    fn pop(&mut self) -> Option<T> {
-        let last_pos = self.last;
-        self.last = self.overflow.pop();
-        last_pos
-    }
-
-    fn peek(&self) -> Option<T> {
-        self.last
-    }
-
-    pub fn len(&self) -> usize {
-        self.overflow.len() + usize::from(self.last.is_some())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.last.is_none()
-    }
-
-    pub fn last(&self) -> Option<T> {
-        self.peek()
-    }
-}
-
-impl<T: PartialEq + Clone + Copy> PartialEq for CallStack<T> {
-    fn eq(&self, other: &Self) -> bool {
-        if let Some(site1) = self.last
-            && let Some(site2) = other.last
-        {
-            site1 == site2 && self.overflow == other.overflow
-        } else {
-            self.last.is_none() && other.last.is_none()
-        }
-    }
-}
-
-pub trait Callstackable<T> {
-    fn callstack(&self) -> &CallStack<T>;
-    fn callstack_mut(&mut self) -> &mut CallStack<T>;
 }
 
 #[derive(Debug, Clone)]
@@ -76,15 +19,15 @@ pub struct Dot {
     addr: f64,
     uuid: u64,
     selector: ValueSelector,
-    callstack: CallStack<Position>,
+    callstack: Callstack<Position>,
 }
 
 impl Callstackable<Position> for Dot {
-    fn callstack(&self) -> &CallStack<Position> {
+    fn callstack(&self) -> &Callstack<Position> {
         &self.callstack
     }
 
-    fn callstack_mut(&mut self) -> &mut CallStack<Position> {
+    fn callstack_mut(&mut self) -> &mut Callstack<Position> {
         &mut self.callstack
     }
 }
@@ -115,7 +58,7 @@ impl Dot {
             value,
             addr: 0.0,
             selector: ValueSelector::Value,
-            callstack: CallStack::new(),
+            callstack: Callstack::default(),
         }
     }
 
@@ -201,7 +144,7 @@ impl Dot {
     }
 
     pub fn call(&mut self, new_pos: Position) -> &mut Self {
-        self.callstack.push(self.position);
+        self.callstack.push(&self.position);
         self.position = new_pos;
         self
     }
@@ -211,12 +154,12 @@ impl Dot {
         Ok(())
     }
 
-    pub fn callstack(&self) -> &CallStack<Position> {
+    pub fn callstack(&self) -> &Callstack<Position> {
         &self.callstack
     }
 
     pub fn push_callstack(&mut self, position: Position) -> &mut Self {
-        self.callstack.push(position);
+        self.callstack.push(&position);
         self
     }
 

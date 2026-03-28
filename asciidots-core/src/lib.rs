@@ -1,3 +1,4 @@
+pub mod engine;
 pub mod interpreter;
 pub mod linker;
 pub mod native;
