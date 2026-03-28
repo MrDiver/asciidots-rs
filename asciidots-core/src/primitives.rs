@@ -49,7 +49,7 @@ pub trait Directed {
     fn set_direction(&mut self, direction: Direction);
 }
 
-#[derive(Debug, Clone, Copy, Default, Hash)]
+#[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -60,13 +60,6 @@ impl Position {
         Position { x, y }
     }
 }
-
-impl PartialEq for Position {
-    fn eq(&self, other: &Self) -> bool {
-        self.x == other.x && self.y == other.y
-    }
-}
-impl Eq for Position {}
 
 impl From<(i32, i32)> for Position {
     fn from(value: (i32, i32)) -> Self {

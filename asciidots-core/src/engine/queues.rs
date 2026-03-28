@@ -35,4 +35,8 @@ impl<T: Pairable> PairingQueue<T> {
     pub fn len(&self) -> usize {
         self.values.values().map(|q| q.len()).sum()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
 }

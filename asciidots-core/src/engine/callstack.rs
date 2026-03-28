@@ -42,6 +42,10 @@ impl<T: Clone + Hash> Callstack<T> {
         self.frames.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
     pub fn last(&self) -> Option<&T> {
         self.frames.last().map(|f| &f.key)
     }

@@ -1,6 +1,6 @@
 use crate::{
     native::native_fun::NativeFunction,
-    primitives::Position,
+    primitives::{Orientation, Oriented, Position},
     state_machine::DotMachine,
 };
 
@@ -126,6 +126,111 @@ impl NativeFunction for ForNative {
     }
 }
 
+pub struct DupIterState {
+    current: f64,
+    end: f64,
+    template: DotMachine,
+}
+
+pub struct DupNative {
+    active: Vec<DupIterState>,
+}
+
+impl DupNative {
+    pub fn new() -> Self {
+        Self {
+            active: Vec::default(),
+        }
+    }
+}
+
+impl Default for DupNative {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NativeFunction for DupNative {
+    fn name(&self) -> &str {
+        "dup"
+    }
+
+    fn dot_enter(&mut self, dot: DotMachine) {
+        self.active.push(DupIterState {
+            current: 0.0,
+            end: dot.dot().addr(),
+            template: dot,
+        });
+    }
+
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+        for iter_state in &mut self.active {
+            if iter_state.current < iter_state.end {
+                let dot = iter_state.template.clone();
+                output.push(dot);
+                iter_state.current += 1.0;
+            }
+        }
+
+        self.active
+            .retain(|iter_state| iter_state.current < iter_state.end);
+    }
+
+    fn reset(&mut self) {
+        self.active.clear()
+    }
+}
+
+pub struct MemNative {
+    queued: Vec<DotMachine>,
+    current: f64,
+}
+
+impl MemNative {
+    pub fn new() -> Self {
+        Self {
+            queued: Vec::default(),
+            current: 0.0,
+        }
+    }
+}
+
+impl Default for MemNative {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NativeFunction for MemNative {
+    fn name(&self) -> &str {
+        "mem"
+    }
+
+    fn dot_enter(&mut self, dot: DotMachine) {
+        match dot.orientation() {
+            Orientation::Horizontal => self.queued.push(dot),
+            Orientation::Vertical => self.current = dot.selected(),
+        }
+    }
+
+    fn tick_into(&mut self, output: &mut Vec<DotMachine>) {
+        let v: Vec<DotMachine> = self
+            .queued
+            .drain(..)
+            .map(|mut dot| {
+                dot.dot_mut().set_selected(self.current);
+                dot
+            })
+            .collect();
+        output.extend(v);
+    }
+
+    fn reset(&mut self) {
+        self.queued.clear();
+        self.current = 0.0;
+    }
+}
+
 pub struct PushScopeNative {
     queued: Vec<DotMachine>,
 }
@@ -246,7 +351,10 @@ pub fn default_native_library() -> Vec<Box<dyn NativeFunction>> {
         Box::new(TruncNative::new()),
         Box::new(SignumNative::new()),
         Box::new(ForNative::new()),
+        Box::new(DupNative::new()),
+        Box::new(MemNative::new()),
         Box::new(PushScopeNative::new()),
         Box::new(PopScopeNative::new()),
     ]
 }
+

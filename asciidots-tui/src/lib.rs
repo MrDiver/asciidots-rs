@@ -952,7 +952,7 @@ fn interpreter_thread(
         for result in results {
             match result {
                 InterpreterResult::Display { display_id, command } => {
-                    if !display_backends.contains_key(&display_id) {
+                    display_backends.entry(display_id).or_insert_with(|| {
                         let backend: Box<dyn DisplayBackend> = match display_mode {
                             TuiDisplayMode::Minifb => Box::new(MinifbDisplayBackend::new()),
                             TuiDisplayMode::Ratatui => {
@@ -963,8 +963,8 @@ fn interpreter_thread(
                                 Box::new(backend)
                             }
                         };
-                        display_backends.insert(display_id, backend);
-                    }
+                        backend
+                    });
                     display_batches.entry(display_id).or_default().push(command);
                 }
                 other => non_display.push(other),

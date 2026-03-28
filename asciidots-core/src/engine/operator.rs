@@ -33,6 +33,10 @@ impl<T: Pairable> OperatorQueue<T> {
         self.horizontal.len() + self.vertical.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.horizontal.is_empty() && self.vertical.is_empty()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.horizontal.iter().chain(self.vertical.iter())
     }

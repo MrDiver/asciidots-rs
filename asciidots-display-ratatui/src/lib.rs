@@ -186,7 +186,7 @@ impl Widget for DisplayWidget {
         }
 
         let cell_cols = area.width.min(display.width as u16);
-        let cell_rows = area.height.min(((display.height + 1) / 2) as u16);
+        let cell_rows = area.height.min(display.height.div_ceil(2) as u16);
 
         for cell_y in 0..cell_rows {
             let top_row = (cell_y as usize) * 2;
