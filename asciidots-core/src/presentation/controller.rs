@@ -3,6 +3,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use rustc_hash::FxHashSet;
+
 use crate::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
 };
@@ -167,7 +169,18 @@ impl RuntimeController {
     }
 
     pub fn grid_model(&self) -> AsciiMapModel<'_> {
-        AsciiMapModel::new(self.interpreter.get_field(), self.interpreter.get_dots())
+        let operator_with_dots: FxHashSet<(i32, i32)> = self
+            .interpreter
+            .queues()
+            .iter()
+            .filter(|(_, q)| q.waiting_len() > 0)
+            .map(|((x, y), _)| (*x as i32, *y as i32))
+            .collect();
+        AsciiMapModel::new(
+            self.interpreter.get_field(),
+            self.interpreter.get_dots(),
+            operator_with_dots,
+        )
     }
 
     pub fn settings_table_model(&self) -> SettingsTableModel {

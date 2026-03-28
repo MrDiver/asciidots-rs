@@ -9,10 +9,15 @@ use crate::presentation::model_traits::{GridCell, GridCellKind, GridModel};
 pub struct AsciiMapModel<'a> {
     field: &'a AsciiField,
     dot_positions: FxHashSet<(usize, usize)>,
+    operator_with_dots: FxHashSet<(i32, i32)>,
 }
 
 impl<'a> AsciiMapModel<'a> {
-    pub fn new(field: &'a AsciiField, dots: &'a [DotMachine]) -> Self {
+    pub fn new(
+        field: &'a AsciiField,
+        dots: &'a [DotMachine],
+        operator_with_dots: FxHashSet<(i32, i32)>,
+    ) -> Self {
         let dot_positions = dots
             .iter()
             .map(|dot| (dot.position().x as usize, dot.position().y as usize))
@@ -20,6 +25,7 @@ impl<'a> AsciiMapModel<'a> {
         Self {
             field,
             dot_positions,
+            operator_with_dots,
         }
     }
 }
@@ -51,6 +57,11 @@ impl GridModel for AsciiMapModel<'_> {
                 AsciiCell::QuoteStream => GridCellKind::Quote,
                 AsciiCell::OperatorBegin(_) | AsciiCell::OperatorEnd(_) => {
                     GridCellKind::OperatorDelimiter
+                }
+                AsciiCell::Operator { .. }
+                    if self.operator_with_dots.contains(&(x as i32, y as i32)) =>
+                {
+                    GridCellKind::ActiveOperatorWithDots
                 }
                 AsciiCell::Operator { .. } => GridCellKind::Operator,
                 AsciiCell::Digit(_) => GridCellKind::Quote,

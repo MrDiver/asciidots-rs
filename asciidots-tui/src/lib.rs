@@ -9,14 +9,18 @@ use asciidots_core::presentation::{
 };
 use asciidots_display_minifb::MinifbDisplayBackend;
 use asciidots_display_ratatui::{DisplayBuffer, DisplayWidget, RatatuiDisplayBackend};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+    EnableMouseCapture, DisableMouseCapture,
+};
 use rustc_hash::FxHashMap;
 use std::sync::{Arc, RwLock};
+use std::io::stdout;
 use miette::NamedSource;
 use ratatui::widgets::Paragraph;
 use ratatui::{
     DefaultTerminal,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Position as LayoutPosition, Rect},
     style::{Modifier, Style},
     widgets::{
         Block, Borders, Cell, Clear, List, ListItem, Row, Scrollbar, ScrollbarOrientation,
@@ -145,6 +149,7 @@ fn style_for_grid_cell_kind(kind: GridCellKind) -> Style {
         GridCellKind::Command => RGB::WISTERIA,
         GridCellKind::ActiveDot => RGB::CARNATION,
         GridCellKind::ActiveOperator => RGB::HONEYDEW,
+        GridCellKind::ActiveOperatorWithDots => RGB::SPEARMINT,
     };
 
     Style::default().fg(foreground.into())
@@ -256,6 +261,12 @@ pub enum ViewMode {
     ProcessInput(u64),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ActiveTab {
+    Program,
+    Displays,
+}
+
 pub enum TuiDisplayMode {
     Minifb,
     Ratatui,
@@ -274,6 +285,14 @@ pub struct RatatuiView {
     display_mode: TuiDisplayMode,
     display_backends: FxHashMap<u32, Box<dyn DisplayBackend>>,
     ratatui_buffers: FxHashMap<u32, Arc<RwLock<DisplayBuffer>>>,
+    active_tab: ActiveTab,
+    left_width_pct: u16,
+    side_split_pct: u16,
+    dots_scroll: usize,
+    grid_rect: Rect,
+    dots_rect: Rect,
+    output_rect: Rect,
+    settings_rect: Rect,
 }
 
 impl RatatuiView {
@@ -282,6 +301,7 @@ impl RatatuiView {
     }
 
     pub fn with_display_mode(display_mode: TuiDisplayMode) -> Self {
+        crossterm::execute!(stdout(), EnableMouseCapture).ok();
         RatatuiView {
             term: ratatui::init(),
             grid_scroll: (0, 0),
@@ -295,6 +315,14 @@ impl RatatuiView {
             display_mode,
             display_backends: FxHashMap::default(),
             ratatui_buffers: FxHashMap::default(),
+            active_tab: ActiveTab::Program,
+            left_width_pct: 67,
+            side_split_pct: 56,
+            dots_scroll: 0,
+            grid_rect: Rect::default(),
+            dots_rect: Rect::default(),
+            output_rect: Rect::default(),
+            settings_rect: Rect::default(),
         }
     }
 
@@ -331,6 +359,7 @@ impl RatatuiView {
         self.output_entries.clear();
         self.current_output_line.clear();
         self.output_scroll = 0;
+        self.dots_scroll = 0;
         self.output_follow = true;
         self.display_backends.clear();
         self.ratatui_buffers.clear();
@@ -425,6 +454,49 @@ impl RatatuiView {
                     ..
                 } => Some(AppCommand::AdjustStepsPerFrame(100)),
                 KeyEvent {
+                    code: KeyCode::Tab,
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.active_tab = match self.active_tab {
+                        ActiveTab::Program => ActiveTab::Displays,
+                        ActiveTab::Displays => ActiveTab::Program,
+                    };
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char('['),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.left_width_pct = self.left_width_pct.saturating_sub(5).max(20);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char(']'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.left_width_pct = (self.left_width_pct + 5).min(85);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char('-'),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.side_split_pct = self.side_split_pct.saturating_sub(5).max(20);
+                    None
+                }
+                KeyEvent {
+                    code: KeyCode::Char('='),
+                    kind: KeyEventKind::Press,
+                    ..
+                } => {
+                    self.side_split_pct = (self.side_split_pct + 5).min(80);
+                    None
+                }
+                KeyEvent {
                     code: KeyCode::Up,
                     kind: KeyEventKind::Press,
                     ..
@@ -506,28 +578,38 @@ impl Default for RatatuiView {
 
 impl Drop for RatatuiView {
     fn drop(&mut self) {
+        crossterm::execute!(stdout(), DisableMouseCapture).ok();
         ratatui::restore();
+    }
+}
+
+impl RatatuiView {
+    fn scroll_at(&mut self, col: u16, row: u16, delta: i32, shift: bool) {
+        let pos = LayoutPosition { x: col, y: row };
+        if self.grid_rect.contains(pos) {
+            if shift {
+                self.grid_scroll.0 = (self.grid_scroll.0 as i32 + delta).max(0) as usize;
+            } else {
+                self.grid_scroll.1 = (self.grid_scroll.1 as i32 + delta).max(0) as usize;
+            }
+        } else if self.output_rect.contains(pos) {
+            self.output_follow = false;
+            self.output_scroll = (self.output_scroll as i32 + delta).max(0) as usize;
+        } else if self.dots_rect.contains(pos) {
+            self.dots_scroll = (self.dots_scroll as i32 + delta).max(0) as usize;
+        }
     }
 }
 
 impl DotsView for RatatuiView {
     fn render(&mut self, controller: &RuntimeController) {
+        let active_tab = self.active_tab;
+        let left_width_pct = self.left_width_pct;
+        let side_split_pct = self.side_split_pct;
         self.term
             .draw(|frame| {
                 let area = frame.area();
-                let grid_model = controller.grid_model();
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(Constraint::from_ratios([(2, 3), (1, 3)]))
-                    .split(area);
-                let side_rows = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(28),
-                        Constraint::Percentage(28),
-                        Constraint::Percentage(44),
-                    ])
-                    .split(cols[1]);
+
                 let ratatui_buffers: Vec<_> = {
                     let mut ids: Vec<u32> = self.ratatui_buffers.keys().copied().collect();
                     ids.sort();
@@ -536,180 +618,290 @@ impl DotsView for RatatuiView {
                         .collect()
                 };
 
-                let left_rows = if ratatui_buffers.is_empty() {
-                    vec![cols[0]]
-                } else {
-                    Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-                        .split(cols[0])
-                        .to_vec()
-                };
+                // ── tab bar ──────────────────────────────────────────────
+                let [tab_bar_area, content_area] = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .areas(area);
 
-                let program_block = Block::default()
-                    .title("Program")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(RGB::LAVENDER.into()));
-                let program_inner = program_block.inner(left_rows[0]);
-
-                frame.render_widget(program_block, left_rows[0]);
-                frame.render_widget(Clear, program_inner);
+                let tab_labels = ["[1] Program", "[2] Displays"];
+                let tab_text = tab_labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        let is_active = match i {
+                            0 => active_tab == ActiveTab::Program,
+                            _ => active_tab == ActiveTab::Displays,
+                        };
+                        if is_active {
+                            ratatui::text::Span::styled(
+                                format!(" {label} "),
+                                Style::default()
+                                    .fg(RGB::BLACK.into())
+                                    .bg(RGB::LAVENDER.into())
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                        } else {
+                            ratatui::text::Span::styled(
+                                format!(" {label} "),
+                                Style::default().fg(RGB::GRAY_400.into()),
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 frame.render_widget(
-                    GridWidget {
-                        grid_model: &grid_model,
-                        scroll: self.grid_scroll,
-                    },
-                    program_inner,
+                    Paragraph::new(ratatui::text::Line::from(tab_text)),
+                    tab_bar_area,
                 );
 
-                if !ratatui_buffers.is_empty() {
-                    let display_area = left_rows[1];
-                    let count = ratatui_buffers.len() as u32;
-                    let display_cols = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
-                        .split(display_area);
-                    for ((id, buffer), panel_area) in ratatui_buffers.iter().zip(display_cols.iter()) {
-                        let display_block = Block::default()
-                            .title(format!("Display {id}"))
+                match active_tab {
+                    ActiveTab::Displays => {
+                        if ratatui_buffers.is_empty() {
+                            frame.render_widget(
+                                Paragraph::new("No displays active. Run a program with %display."),
+                                content_area,
+                            );
+                        } else {
+                            let count = ratatui_buffers.len() as u32;
+                            let display_cols = Layout::default()
+                                .direction(Direction::Horizontal)
+                                .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
+                                .split(content_area);
+                            for ((id, buffer), panel_area) in
+                                ratatui_buffers.iter().zip(display_cols.iter())
+                            {
+                                let display_block = Block::default()
+                                    .title(format!("Display {id}"))
+                                    .borders(Borders::ALL)
+                                    .border_style(Style::default().fg(RGB::BUBBLEGUM.into()));
+                                let display_inner = display_block.inner(*panel_area);
+                                frame.render_widget(display_block, *panel_area);
+                                frame.render_widget(
+                                    DisplayWidget::new(Arc::clone(buffer)),
+                                    display_inner,
+                                );
+                            }
+                        }
+                    }
+                    ActiveTab::Program => {
+                        let grid_model = controller.grid_model();
+                        let right_pct = 100u16.saturating_sub(left_width_pct);
+                        let cols = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([
+                                Constraint::Percentage(left_width_pct),
+                                Constraint::Percentage(right_pct),
+                            ])
+                            .split(content_area);
+
+                        let side_rows = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([
+                                Constraint::Percentage(side_split_pct / 2),
+                                Constraint::Percentage(side_split_pct / 2),
+                                Constraint::Percentage(100 - side_split_pct),
+                            ])
+                            .split(cols[1]);
+
+                        let left_rows = if ratatui_buffers.is_empty() {
+                            vec![cols[0]]
+                        } else {
+                            Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                                .split(cols[0])
+                                .to_vec()
+                        };
+
+                        let program_block = Block::default()
+                            .title("Program")
                             .borders(Borders::ALL)
-                            .border_style(Style::default().fg(RGB::BUBBLEGUM.into()));
-                        let display_inner = display_block.inner(*panel_area);
-                        frame.render_widget(display_block, *panel_area);
-                        frame.render_widget(DisplayWidget::new(Arc::clone(buffer)), display_inner);
-                    }
-                }
-                let settings_block = Block::default()
-                    .title("Status")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(RGB::SKY.into()));
-                let settings_inner = settings_block.inner(side_rows[0]);
-                frame.render_widget(settings_block, side_rows[0]);
-                let settings_model = controller.settings_table_model();
+                            .border_style(Style::default().fg(RGB::LAVENDER.into()));
+                        let program_inner = program_block.inner(left_rows[0]);
+                        self.grid_rect = left_rows[0];
+                        frame.render_widget(program_block, left_rows[0]);
+                        frame.render_widget(Clear, program_inner);
+                        frame.render_widget(
+                            GridWidget {
+                                grid_model: &grid_model,
+                                scroll: self.grid_scroll,
+                            },
+                            program_inner,
+                        );
 
-                let header_cells = (0..settings_model.column_count())
-                    .map(|column| {
-                        let text = settings_model.header(column).unwrap_or("");
-                        Cell::from(text).style(
-                            Style::default()
-                                .fg(RGB::SKY.into())
-                                .add_modifier(Modifier::BOLD),
-                        )
-                    })
-                    .collect::<Vec<_>>();
+                        if !ratatui_buffers.is_empty() {
+                            let display_area = left_rows[1];
+                            let count = ratatui_buffers.len() as u32;
+                            let display_cols = Layout::default()
+                                .direction(Direction::Horizontal)
+                                .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
+                                .split(display_area);
+                            for ((id, buffer), panel_area) in
+                                ratatui_buffers.iter().zip(display_cols.iter())
+                            {
+                                let display_block = Block::default()
+                                    .title(format!("Display {id}"))
+                                    .borders(Borders::ALL)
+                                    .border_style(Style::default().fg(RGB::BUBBLEGUM.into()));
+                                let display_inner = display_block.inner(*panel_area);
+                                frame.render_widget(display_block, *panel_area);
+                                frame.render_widget(
+                                    DisplayWidget::new(Arc::clone(buffer)),
+                                    display_inner,
+                                );
+                            }
+                        }
 
-                let rows = (0..settings_model.row_count())
-                    .map(|row| {
-                        let cells = (0..settings_model.column_count())
+                        // ── Status ──────────────────────────────────────────
+                        self.settings_rect = side_rows[0];
+                        let settings_block = Block::default()
+                            .title("Status")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(RGB::SKY.into()));
+                        let settings_inner = settings_block.inner(side_rows[0]);
+                        frame.render_widget(settings_block, side_rows[0]);
+                        let settings_model = controller.settings_table_model();
+                        let header_cells = (0..settings_model.column_count())
                             .map(|column| {
-                                if let Some(table_cell) = settings_model.get_cell(row, column) {
-                                    let style = style_for_table_cell(&table_cell);
-                                    Cell::from(table_cell.text).style(style)
-                                } else {
-                                    Cell::from("")
-                                }
+                                let text = settings_model.header(column).unwrap_or("");
+                                Cell::from(text).style(
+                                    Style::default()
+                                        .fg(RGB::SKY.into())
+                                        .add_modifier(Modifier::BOLD),
+                                )
                             })
                             .collect::<Vec<_>>();
-                        Row::new(cells)
-                    })
-                    .collect::<Vec<_>>();
-
-                let table = Table::new(
-                    rows,
-                    [Constraint::Percentage(35), Constraint::Percentage(65)],
-                )
-                .header(Row::new(header_cells))
-                .column_spacing(1);
-
-                frame.render_widget(table, settings_inner);
-
-                let dots_block = Block::default()
-                    .title("Dots")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(RGB::PEACH.into()));
-                let dots_inner = dots_block.inner(side_rows[1]);
-                frame.render_widget(dots_block, side_rows[1]);
-                let dots_model = controller.dot_debug_table_model();
-
-                let dot_header_cells = (0..dots_model.column_count())
-                    .map(|column| {
-                        let text = dots_model.header(column).unwrap_or("");
-                        Cell::from(text).style(
-                            Style::default()
-                                .fg(RGB::PEACH.into())
-                                .add_modifier(Modifier::BOLD),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-
-                let dot_rows = (0..dots_model.row_count())
-                    .map(|row| {
-                        let cells = (0..dots_model.column_count())
-                            .map(|column| {
-                                if let Some(table_cell) = dots_model.get_cell(row, column) {
-                                    let style = style_for_table_cell(&table_cell);
-                                    Cell::from(table_cell.text).style(style)
-                                } else {
-                                    Cell::from("")
-                                }
+                        let rows = (0..settings_model.row_count())
+                            .map(|row| {
+                                let cells = (0..settings_model.column_count())
+                                    .map(|column| {
+                                        if let Some(table_cell) = settings_model.get_cell(row, column) {
+                                            let style = style_for_table_cell(&table_cell);
+                                            Cell::from(table_cell.text).style(style)
+                                        } else {
+                                            Cell::from("")
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                Row::new(cells)
                             })
                             .collect::<Vec<_>>();
-                        Row::new(cells)
-                    })
-                    .collect::<Vec<_>>();
+                        let table = Table::new(
+                            rows,
+                            [Constraint::Percentage(35), Constraint::Percentage(65)],
+                        )
+                        .header(Row::new(header_cells))
+                        .column_spacing(1);
+                        frame.render_widget(table, settings_inner);
 
-                let dots_table = Table::new(
-                    dot_rows,
-                    (0..dots_model.column_count()).map(|_column| Constraint::Min(4)),
-                )
-                .header(Row::new(dot_header_cells))
-                .column_spacing(1);
+                        // ── Dots ─────────────────────────────────────────────
+                        self.dots_rect = side_rows[1];
+                        let dots_block = Block::default()
+                            .title("Dots")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(RGB::PEACH.into()));
+                        let dots_inner = dots_block.inner(side_rows[1]);
+                        frame.render_widget(dots_block, side_rows[1]);
+                        let dots_model = controller.dot_debug_table_model();
+                        let total_dot_rows = dots_model.row_count();
+                        // -1 for the header row
+                        let visible_dot_rows = (dots_inner.height as usize).saturating_sub(1);
+                        let max_dot_scroll = total_dot_rows.saturating_sub(visible_dot_rows);
+                        self.dots_scroll = self.dots_scroll.min(max_dot_scroll);
+                        let dot_start = self.dots_scroll;
+                        let dot_end = (dot_start + visible_dot_rows).min(total_dot_rows);
+                        let dot_header_cells = (0..dots_model.column_count())
+                            .map(|column| {
+                                let text = dots_model.header(column).unwrap_or("");
+                                Cell::from(text).style(
+                                    Style::default()
+                                        .fg(RGB::PEACH.into())
+                                        .add_modifier(Modifier::BOLD),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        let dots_cols = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([Constraint::Min(1), Constraint::Length(1)])
+                            .split(dots_inner);
+                        let dot_rows = (dot_start..dot_end)
+                            .map(|row| {
+                                let cells = (0..dots_model.column_count())
+                                    .map(|column| {
+                                        if let Some(table_cell) = dots_model.get_cell(row, column) {
+                                            let style = style_for_table_cell(&table_cell);
+                                            Cell::from(table_cell.text).style(style)
+                                        } else {
+                                            Cell::from("")
+                                        }
+                                    })
+                                    .collect::<Vec<_>>();
+                                Row::new(cells)
+                            })
+                            .collect::<Vec<_>>();
+                        let dots_table = Table::new(
+                            dot_rows,
+                            (0..dots_model.column_count()).map(|_| Constraint::Min(4)),
+                        )
+                        .header(Row::new(dot_header_cells))
+                        .column_spacing(1);
+                        frame.render_widget(dots_table, dots_cols[0]);
+                        let mut dot_scrollbar_state = ScrollbarState::default()
+                            .content_length(total_dot_rows.max(1))
+                            .position(dot_start);
+                        frame.render_stateful_widget(
+                            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                            dots_cols[1],
+                            &mut dot_scrollbar_state,
+                        );
 
-                frame.render_widget(dots_table, dots_inner);
-
-                let output_block = Block::default()
-                    .title("Output")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(RGB::SAGE.into()));
-                let output_inner = output_block.inner(side_rows[2]);
-                frame.render_widget(output_block, side_rows[2]);
-                let output_cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Min(1), Constraint::Length(1)])
-                    .split(output_inner);
-                let output_model =
-                    OutputListModel::from_output(&self.output_entries, &self.current_output_line);
-                let visible_count = output_cols[0].height as usize;
-                let total_items = output_model.item_count();
-                let max_scroll = total_items.saturating_sub(visible_count);
-                if self.output_follow {
-                    self.output_scroll = max_scroll;
-                } else {
-                    self.output_scroll = self.output_scroll.min(max_scroll);
-                    if self.output_scroll >= max_scroll {
-                        self.output_follow = true;
+                        // ── Output ───────────────────────────────────────────
+                        self.output_rect = side_rows[2];
+                        let output_block = Block::default()
+                            .title("Output")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(RGB::SAGE.into()));
+                        let output_inner = output_block.inner(side_rows[2]);
+                        frame.render_widget(output_block, side_rows[2]);
+                        let output_cols = Layout::default()
+                            .direction(Direction::Horizontal)
+                            .constraints([Constraint::Min(1), Constraint::Length(1)])
+                            .split(output_inner);
+                        let output_model = OutputListModel::from_output(
+                            &self.output_entries,
+                            &self.current_output_line,
+                        );
+                        let visible_count = output_cols[0].height as usize;
+                        let total_items = output_model.item_count();
+                        let max_scroll = total_items.saturating_sub(visible_count);
+                        if self.output_follow {
+                            self.output_scroll = max_scroll;
+                        } else {
+                            self.output_scroll = self.output_scroll.min(max_scroll);
+                            if self.output_scroll >= max_scroll {
+                                self.output_follow = true;
+                            }
+                        }
+                        let scroll = self.output_scroll;
+                        let end = (scroll + visible_count).min(total_items);
+                        let items = (scroll..end)
+                            .filter_map(|index| output_model.get_item(index))
+                            .map(|cell| {
+                                let style = style_for_list_cell(&cell);
+                                ListItem::new(cell.text).style(style)
+                            })
+                            .collect::<Vec<_>>();
+                        frame.render_widget(List::new(items), output_cols[0]);
+                        let mut scrollbar_state = ScrollbarState::default()
+                            .content_length(total_items.max(1))
+                            .position(scroll);
+                        frame.render_stateful_widget(
+                            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                            output_cols[1],
+                            &mut scrollbar_state,
+                        );
                     }
                 }
-                let scroll = self.output_scroll;
-                let end = (scroll + visible_count).min(total_items);
-                let items = (scroll..end)
-                    .filter_map(|index| output_model.get_item(index))
-                    .map(|cell| {
-                        let style = style_for_list_cell(&cell);
-                        ListItem::new(cell.text).style(style)
-                    })
-                    .collect::<Vec<_>>();
-                let list = List::new(items);
-                frame.render_widget(list, output_cols[0]);
-
-                let mut scrollbar_state = ScrollbarState::default()
-                    .content_length(total_items.max(1))
-                    .position(scroll);
-                frame.render_stateful_widget(
-                    Scrollbar::new(ScrollbarOrientation::VerticalRight),
-                    output_cols[1],
-                    &mut scrollbar_state,
-                );
 
                 if let ViewMode::ProcessInput(uuid) = self.mode {
                     let input_area = area.centered(Constraint::Max(40), Constraint::Length(4));
@@ -729,6 +921,19 @@ impl DotsView for RatatuiView {
         if event::poll(Duration::from_millis(1)).unwrap() {
             match event::read().unwrap() {
                 Event::Key(event) => self.handle_key_event(&event),
+                Event::Mouse(mouse) => {
+                    let shift = mouse.modifiers.contains(KeyModifiers::SHIFT);
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => {
+                            self.scroll_at(mouse.column, mouse.row, -3, shift);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            self.scroll_at(mouse.column, mouse.row, 3, shift);
+                        }
+                        _ => {}
+                    }
+                    None
+                }
                 _ => None,
             }
         } else {

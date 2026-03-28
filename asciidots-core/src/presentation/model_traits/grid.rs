@@ -5,6 +5,7 @@ pub enum GridCellKind {
     OperatorDelimiter,
     Operator,
     ActiveOperator,
+    ActiveOperatorWithDots,
     Command,
     ActiveDot,
 }
