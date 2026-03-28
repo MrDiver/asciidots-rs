@@ -62,6 +62,19 @@ impl Default for RatatuiDisplayBackend {
 impl DisplayBackend for RatatuiDisplayBackend {
     fn handle(&mut self, command: DisplayCommand) {
         let Ok(mut buf) = self.buffer.write() else { return; };
+        Self::apply_to_buf(&mut buf, command);
+    }
+
+    fn handle_batch(&mut self, commands: &[DisplayCommand]) {
+        let Ok(mut buf) = self.buffer.write() else { return; };
+        for command in commands {
+            Self::apply_to_buf(&mut buf, command.clone());
+        }
+    }
+}
+
+impl RatatuiDisplayBackend {
+    fn apply_to_buf(buf: &mut DisplayBuffer, command: DisplayCommand) {
         match command {
             DisplayCommand::SetWidth(w) => {
                 buf.width = w;

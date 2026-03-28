@@ -3,8 +3,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rustc_hash::FxHashSet;
-
 use crate::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
 };
@@ -148,14 +146,20 @@ impl RuntimeController {
         self.clock = Instant::now();
         let deadline = Instant::now() + budget;
         let mut all_results = Vec::new();
-        for _ in 0..self.steps_per_frame {
-            if self.interpreter.is_finished() || Instant::now() >= deadline {
+        let batch_start = Instant::now();
+        let mut steps_run: usize = 0;
+        for i in 0..self.steps_per_frame {
+            if self.interpreter.is_finished() {
                 break;
             }
-            let start = Instant::now();
+            // Check the deadline every 256 steps to avoid calling Instant::now()
+            // on every iteration — the syscall overhead adds up at high step counts.
+            if i & 255 == 255 && Instant::now() >= deadline {
+                break;
+            }
             let results = self.interpreter.step().unwrap().to_vec();
-            self.last_step_duration = start.elapsed();
             self.tick_count += 1;
+            steps_run += 1;
             let needs_input = results.iter().any(|r| {
                 matches!(r, InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram)
             });
@@ -163,6 +167,9 @@ impl RuntimeController {
             if needs_input {
                 break;
             }
+        }
+        if steps_run > 0 {
+            self.last_step_duration = batch_start.elapsed() / steps_run as u32;
         }
         all_results
     }
@@ -198,7 +205,7 @@ impl RuntimeController {
     }
 
     pub fn grid_model(&self) -> AsciiMapModel<'_> {
-        let operator_with_dots: FxHashSet<(i32, i32)> = self
+        let operator_with_dots = self
             .interpreter
             .queues()
             .iter()

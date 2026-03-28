@@ -271,9 +271,15 @@ pub enum ActiveTab {
     Displays,
 }
 
+#[derive(Clone, Copy)]
 pub enum TuiDisplayMode {
     Minifb,
     Ratatui,
+}
+
+enum DisplayReg {
+    New(u32, Arc<RwLock<DisplayBuffer>>),
+    Reset,
 }
 
 pub struct RatatuiView {
@@ -286,8 +292,6 @@ pub struct RatatuiView {
     running: bool,
     mode: ViewMode,
     input_string: String,
-    display_mode: TuiDisplayMode,
-    display_backends: FxHashMap<u32, Box<dyn DisplayBackend>>,
     ratatui_buffers: FxHashMap<u32, Arc<RwLock<DisplayBuffer>>>,
     active_tab: ActiveTab,
     left_width_pct: u16,
@@ -301,10 +305,6 @@ pub struct RatatuiView {
 
 impl RatatuiView {
     pub fn new() -> Self {
-        Self::with_display_mode(TuiDisplayMode::Ratatui)
-    }
-
-    pub fn with_display_mode(display_mode: TuiDisplayMode) -> Self {
         crossterm::execute!(stdout(), EnableMouseCapture).ok();
         RatatuiView {
             term: ratatui::init(),
@@ -316,8 +316,6 @@ impl RatatuiView {
             running: false,
             mode: ViewMode::Normal,
             input_string: String::new(),
-            display_mode,
-            display_backends: FxHashMap::default(),
             ratatui_buffers: FxHashMap::default(),
             active_tab: ActiveTab::Program,
             left_width_pct: 67,
@@ -336,21 +334,6 @@ impl RatatuiView {
                 self.input_string.clear();
                 self.mode = ViewMode::ProcessInput(*uuid);
             }
-            if let InterpreterResult::Display { display_id, command } = result {
-                let id = *display_id;
-                if !self.display_backends.contains_key(&id) {
-                    let backend: Box<dyn DisplayBackend> = match self.display_mode {
-                        TuiDisplayMode::Minifb => Box::new(MinifbDisplayBackend::new()),
-                        TuiDisplayMode::Ratatui => {
-                            let backend = RatatuiDisplayBackend::new();
-                            self.ratatui_buffers.insert(id, backend.buffer());
-                            Box::new(backend)
-                        }
-                    };
-                    self.display_backends.insert(id, backend);
-                }
-                self.display_backends.get_mut(&id).unwrap().handle(command.clone());
-            }
             apply_result_to_output(
                 &mut self.output_entries,
                 &mut self.current_output_line,
@@ -365,7 +348,6 @@ impl RatatuiView {
         self.output_scroll = 0;
         self.dots_scroll = 0;
         self.output_follow = true;
-        self.display_backends.clear();
         self.ratatui_buffers.clear();
     }
 
@@ -579,6 +561,7 @@ impl Default for RatatuiView {
         Self::new()
     }
 }
+
 
 impl Drop for RatatuiView {
     fn drop(&mut self) {
@@ -952,27 +935,81 @@ fn interpreter_thread(
     shared: Arc<RwLock<RuntimeController>>,
     cmd_rx: mpsc::Receiver<AppCommand>,
     result_tx: mpsc::Sender<Vec<InterpreterResult>>,
+    display_mode: TuiDisplayMode,
+    display_reg_tx: mpsc::Sender<DisplayReg>,
 ) {
+    let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
+
+    // Route Display events to local backends; forward everything else to the UI.
+    let route = |results: Vec<InterpreterResult>,
+                     display_backends: &mut FxHashMap<u32, Box<dyn DisplayBackend>>,
+                     display_reg_tx: &mpsc::Sender<DisplayReg>|
+     -> Vec<InterpreterResult> {
+        let mut non_display: Vec<InterpreterResult> = Vec::new();
+        let mut display_batches: FxHashMap<u32, Vec<asciidots_core::interpreter::DisplayCommand>> =
+            FxHashMap::default();
+
+        for result in results {
+            match result {
+                InterpreterResult::Display { display_id, command } => {
+                    if !display_backends.contains_key(&display_id) {
+                        let backend: Box<dyn DisplayBackend> = match display_mode {
+                            TuiDisplayMode::Minifb => Box::new(MinifbDisplayBackend::new()),
+                            TuiDisplayMode::Ratatui => {
+                                let backend = RatatuiDisplayBackend::new();
+                                display_reg_tx
+                                    .send(DisplayReg::New(display_id, backend.buffer()))
+                                    .ok();
+                                Box::new(backend)
+                            }
+                        };
+                        display_backends.insert(display_id, backend);
+                    }
+                    display_batches.entry(display_id).or_default().push(command);
+                }
+                other => non_display.push(other),
+            }
+        }
+
+        for (id, cmds) in display_batches {
+            if let Some(backend) = display_backends.get_mut(&id) {
+                backend.handle_batch(&cmds);
+            }
+        }
+        non_display
+    };
+
     loop {
         // Process any pending commands before stepping.
         let mut stop = false;
         while let Ok(cmd) = cmd_rx.try_recv() {
-            if matches!(cmd, AppCommand::StopProgram) {
-                stop = true;
-                break;
-            }
-            let results = shared.write().unwrap().handle_command(cmd);
-            if !results.is_empty() && result_tx.send(results).is_err() {
-                return;
+            match cmd {
+                AppCommand::StopProgram => { stop = true; break; }
+                AppCommand::Reset => {
+                    display_backends.clear();
+                    display_reg_tx.send(DisplayReg::Reset).ok();
+                    let results = shared.write().unwrap().handle_command(AppCommand::Reset);
+                    let non_display = route(results, &mut display_backends, &display_reg_tx);
+                    if !non_display.is_empty() && result_tx.send(non_display).is_err() {
+                        return;
+                    }
+                }
+                cmd => {
+                    let results = shared.write().unwrap().handle_command(cmd);
+                    let non_display = route(results, &mut display_backends, &display_reg_tx);
+                    if !non_display.is_empty() && result_tx.send(non_display).is_err() {
+                        return;
+                    }
+                }
             }
         }
         if stop {
             break;
         }
 
-        // Run steps for at most 2 ms, then release the lock so the UI thread
+        // Run steps for at most 8 ms, then release the lock so the UI thread
         // can always get a read lock within that window.
-        let results = shared.write().unwrap().tick_budgeted(Duration::from_millis(2));
+        let results = shared.write().unwrap().tick_budgeted(Duration::from_millis(8));
 
         if results.is_empty() {
             // Not running or tick_speed hasn't elapsed yet — avoid busy-spin.
@@ -980,11 +1017,13 @@ fn interpreter_thread(
             continue;
         }
 
-        let needs_input = results
+        let non_display = route(results, &mut display_backends, &display_reg_tx);
+
+        let needs_input = non_display
             .iter()
             .any(|r| matches!(r, InterpreterResult::InputRequest(_)));
 
-        if result_tx.send(results).is_err() {
+        if !non_display.is_empty() && result_tx.send(non_display).is_err() {
             break;
         }
 
@@ -997,9 +1036,14 @@ fn interpreter_thread(
                 };
                 let is_answer = matches!(cmd, AppCommand::InputAnswer(..));
                 let is_stop = matches!(cmd, AppCommand::StopProgram);
+                if matches!(cmd, AppCommand::Reset) {
+                    display_backends.clear();
+                    display_reg_tx.send(DisplayReg::Reset).ok();
+                }
                 let results = shared.write().unwrap().handle_command(cmd);
-                if !results.is_empty() {
-                    result_tx.send(results).ok();
+                let non_display = route(results, &mut display_backends, &display_reg_tx);
+                if !non_display.is_empty() {
+                    result_tx.send(non_display).ok();
                 }
                 if is_stop {
                     return;
@@ -1022,17 +1066,26 @@ fn run_with_controller(
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<AppCommand>();
     let (result_tx, result_rx) = mpsc::channel::<Vec<InterpreterResult>>();
+    let (display_reg_tx, display_reg_rx) = mpsc::channel::<DisplayReg>();
 
     let interp_shared = Arc::clone(&shared);
     let _interp = thread::spawn(move || {
-        interpreter_thread(interp_shared, cmd_rx, result_tx);
+        interpreter_thread(interp_shared, cmd_rx, result_tx, display_mode, display_reg_tx);
     });
 
-    let mut view = RatatuiView::with_display_mode(display_mode);
+    let mut view = RatatuiView::new();
     let frame_budget = Duration::from_millis(16); // ~60 fps cap
 
     loop {
         let frame_start = Instant::now();
+
+        // Register any new display buffers the interpreter thread created.
+        while let Ok(reg) = display_reg_rx.try_recv() {
+            match reg {
+                DisplayReg::New(id, buffer) => { view.ratatui_buffers.insert(id, buffer); }
+                DisplayReg::Reset => { view.ratatui_buffers.clear(); }
+            }
+        }
 
         // Drain all results the interpreter produced since last frame.
         while let Ok(results) = result_rx.try_recv() {

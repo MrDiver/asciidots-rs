@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -8,8 +10,10 @@ use crate::presentation::model_traits::{GridCell, GridCellKind, GridModel};
 
 pub struct AsciiMapModel<'a> {
     field: &'a AsciiField,
-    dot_positions: FxHashSet<(usize, usize)>,
+    dots: &'a [DotMachine],
     operator_with_dots: FxHashSet<(i32, i32)>,
+    /// Built on first call to get_cell — zero cost if the grid is never rendered.
+    dot_positions: OnceCell<FxHashSet<(i32, i32)>>,
 }
 
 impl<'a> AsciiMapModel<'a> {
@@ -18,15 +22,21 @@ impl<'a> AsciiMapModel<'a> {
         dots: &'a [DotMachine],
         operator_with_dots: FxHashSet<(i32, i32)>,
     ) -> Self {
-        let dot_positions = dots
-            .iter()
-            .map(|dot| (dot.position().x as usize, dot.position().y as usize))
-            .collect();
         Self {
             field,
-            dot_positions,
+            dots,
             operator_with_dots,
+            dot_positions: OnceCell::new(),
         }
+    }
+
+    fn dot_positions(&self) -> &FxHashSet<(i32, i32)> {
+        self.dot_positions.get_or_init(|| {
+            self.dots
+                .iter()
+                .map(|d| (d.position().x, d.position().y))
+                .collect()
+        })
     }
 }
 
@@ -49,7 +59,8 @@ impl GridModel for AsciiMapModel<'_> {
             y: y as i32,
         });
 
-        let kind = if self.dot_positions.contains(&(x, y)) {
+        let pos = (x as i32, y as i32);
+        let kind = if self.dot_positions().contains(&pos) {
             GridCellKind::ActiveDot
         } else {
             match token {
@@ -59,7 +70,7 @@ impl GridModel for AsciiMapModel<'_> {
                     GridCellKind::OperatorDelimiter
                 }
                 AsciiCell::Operator { .. }
-                    if self.operator_with_dots.contains(&(x as i32, y as i32)) =>
+                    if self.operator_with_dots.contains(&pos) =>
                 {
                     GridCellKind::ActiveOperatorWithDots
                 }
