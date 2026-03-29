@@ -177,6 +177,8 @@ version = "0.1.0"
 dependencies = [
  "asciidots-core",
  "rustc-hash",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -75,7 +75,7 @@ fn node_label(t: &NodeType) -> String {
         NodeType::EndProgram => "EndProgram".to_string(),
         NodeType::Call(kind) => match kind {
             CallKind::NativeCall(name) => format!("NativeCall({name})"),
-            CallKind::AsciiCall(name) => format!("Call({name})"),
+            CallKind::AsciiCall(id) => format!("Call(fn#{id})"),
         },
         NodeType::CallEnter => "CallEnter".to_string(),
         NodeType::Return => "Return".to_string(),
@@ -84,7 +84,8 @@ fn node_label(t: &NodeType) -> String {
             if *negated { "Conditional(!)".to_string() } else { "Conditional".to_string() }
         }
         NodeType::Filter(b) => format!("Filter({b})"),
-        NodeType::Assertion => "Assertion".to_string(),
+        NodeType::Assertion(Some(v)) => format!("Assertion(== {v})"),
+        NodeType::Assertion(None) => "Assertion".to_string(),
         NodeType::Select(sel) => format!("Select({sel:?})"),
         NodeType::Display(id) => format!("Display({id})"),
     }

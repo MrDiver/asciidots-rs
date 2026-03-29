@@ -28,6 +28,9 @@ pub struct Tracer {
     visited: FxHashSet<(Position, Direction)>,
     position_nodes: FxHashMap<Position, NodeId>,
     func_entry_map: FxHashMap<u32, NodeId>,
+    /// Tracks (node_id, exit_port) pairs that have already had an outgoing tracer spawned.
+    /// Prevents duplicate edges when a node (e.g. Duplicate) is visited from multiple directions.
+    spawned_from: FxHashSet<(NodeId, PortType)>,
 }
 
 pub struct TracingDot {
@@ -89,6 +92,7 @@ impl Tracer {
             visited: FxHashSet::default(),
             position_nodes: FxHashMap::default(),
             func_entry_map: FxHashMap::default(),
+            spawned_from: FxHashSet::default(),
         }
     }
 
@@ -96,6 +100,7 @@ impl Tracer {
         Graph {
             nodes: self.nodes,
             edges: self.edges,
+            func_entry_nodes: self.func_entry_map,
         }
     }
 
@@ -238,7 +243,9 @@ impl Tracer {
                     pos = next_pos;
                 }
                 AsciiCell::ForceDirection(forced) => {
-                    dir = *forced;
+                    if dir.orthogonal(forced){
+                        dir = *forced;
+                    }
                     ticks += 1;
                     pos = next_pos;
                 }
@@ -357,21 +364,30 @@ impl Tracer {
                 Some(self.get_or_insert_pos(pos, NodeType::Conditional(negated)))
             }
             AsciiCell::Filter(b) => Some(self.get_or_insert_pos(pos, NodeType::Filter(*b))),
-            AsciiCell::Assertion => Some(self.get_or_insert_pos(pos, NodeType::Assertion)),
+            AsciiCell::Assertion => {
+                let expected = self.collect_assertion_value(pos, dir);
+                Some(self.get_or_insert_pos(pos, NodeType::Assertion(expected)))
+            }
             AsciiCell::Display(id) => Some(self.get_or_insert_pos(pos, NodeType::Display(*id))),
 
             AsciiCell::Call(name) => {
+                // Unresolved call — resolve_calls() couldn't match the name to a known function.
                 let call_kind = if self.native_names.contains(name.as_ref()) {
                     CallKind::NativeCall(name.to_string())
                 } else {
-                    CallKind::AsciiCall(name.to_string())
+                    let id = self
+                        .function_name_to_id
+                        .get(&**name)
+                        .copied()
+                        .unwrap_or(u32::MAX);
+                    CallKind::AsciiCall(id)
                 };
                 Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
             AsciiCell::CallById(id) => {
                 let call_kind = match self.function_defs.get(*id as usize) {
                     Some(FunctionKind::Native(name)) => CallKind::NativeCall(name.clone()),
-                    Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(id.to_string()),
+                    Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(*id),
                 };
                 Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
@@ -425,14 +441,17 @@ impl Tracer {
                         AsciiCell::ValueMarker | AsciiCell::AddrMarker
                     )
                 {
-                    queue.push_back(TracingDot {
-                        pos: modifier_pos,
-                        direction: dir,
-                        from_call: false,
-                        edge_from: node_id,
-                        edge_from_port: exit_port(dir),
-                        edge_ticks: 1,
-                    });
+                    let port = exit_port(dir);
+                    if self.spawned_from.insert((node_id, port)) {
+                        queue.push_back(TracingDot {
+                            pos: modifier_pos,
+                            direction: dir,
+                            from_call: false,
+                            edge_from: node_id,
+                            edge_from_port: port,
+                            edge_ticks: 1,
+                        });
+                    }
                 } else {
                     self.enqueue_tracer(pos, dir, node_id, queue);
                 }
@@ -482,54 +501,74 @@ impl Tracer {
             }
 
             // --- CallById: native emits in all four directions; ascii continues + jumps to body ---
-            AsciiCell::CallById(id) => match self.function_defs.get(*id as usize) {
-                Some(FunctionKind::Native(_)) => {
-                    for out_dir in [
-                        Direction::Up,
-                        Direction::Down,
-                        Direction::Left,
-                        Direction::Right,
-                    ] {
-                        self.enqueue_tracer(pos, out_dir, node_id, queue);
+            AsciiCell::CallById(id) => {
+                // Resolve the function kind before mutably borrowing self for enqueue_tracer.
+                enum ResolvedCall {
+                    Native,
+                    Ascii(Position, u32),
+                }
+                let resolved = match self.function_defs.get(*id as usize) {
+                    Some(FunctionKind::Native(_)) => ResolvedCall::Native,
+                    Some(FunctionKind::Ascii(p)) => ResolvedCall::Ascii(*p, *id),
+                    None => return,
+                };
+                match resolved {
+                    ResolvedCall::Native => {
+                        for out_dir in [
+                            Direction::Up,
+                            Direction::Down,
+                            Direction::Left,
+                            Direction::Right,
+                        ] {
+                            self.enqueue_tracer(pos, out_dir, node_id, queue);
+                        }
+                    }
+                    ResolvedCall::Ascii(defret_pos, id) => {
+                        self.enqueue_tracer(pos, dir, node_id, queue);
+                        if !self.func_entry_map.contains_key(&id) {
+                            queue.push_back(TracingDot {
+                                pos: defret_pos,
+                                direction: dir,
+                                from_call: true,
+                                edge_from: node_id,
+                                edge_from_port: exit_port(dir),
+                                edge_ticks: 0,
+                            });
+                        }
                     }
                 }
-                Some(FunctionKind::Ascii(defret_pos)) => {
-                    self.enqueue_tracer(pos, dir, node_id, queue);
-                    let defret_pos = *defret_pos;
-                    if !self.func_entry_map.contains_key(id) {
-                        queue.push_back(TracingDot {
-                            pos: defret_pos,
-                            direction: dir,
-                            from_call: true,
-                            edge_from: node_id,
-                            edge_from_port: exit_port(dir),
-                            edge_ticks: 0,
-                        });
-                    }
-                }
-                None => {}
-            },
+            }
 
-            // --- Sinks: no outgoing dots ---
-            AsciiCell::StopProgram | AsciiCell::Display(_) => {}
+            AsciiCell::StopProgram => {}
+
+            // Display: Down→SetPixel reverses to Up and continues; all other directions are sinks.
+            AsciiCell::Display(_) => {
+                if dir == Direction::Down {
+                    self.enqueue_tracer(pos, Direction::Up, node_id, queue);
+                }
+            }
 
             _ => {}
         }
     }
 
     fn enqueue_tracer(
-        &self,
+        &mut self,
         pos: Position,
         dir: Direction,
         from_node: NodeId,
         queue: &mut VecDeque<TracingDot>,
     ) {
+        let port = exit_port(dir);
+        if !self.spawned_from.insert((from_node, port)) {
+            return; // already spawned a tracer from this node on this port
+        }
         queue.push_back(TracingDot {
             pos,
             direction: dir,
             from_call: false,
             edge_from: from_node,
-            edge_from_port: exit_port(dir),
+            edge_from_port: port,
             edge_ticks: 0,
         });
     }
@@ -590,6 +629,33 @@ impl Tracer {
                 } else {
                     SetKind::Addr(v)
                 })
+            }
+            _ => None,
+        }
+    }
+
+    fn collect_assertion_value(&self, pos: Position, dir: Direction) -> Option<f64> {
+        let next = pos + Position::from(dir);
+        if !self.field.in_bounds(&next) {
+            return None;
+        }
+        match self.field.at(&next) {
+            AsciiCell::Digit(d) => {
+                let mut acc = *d as u64;
+                let mut cur = next + Position::from(dir);
+                while self.field.in_bounds(&cur) {
+                    match self.field.at(&cur) {
+                        AsciiCell::Digit(d2) => {
+                            acc = acc * 10 + *d2 as u64;
+                            cur = cur + Position::from(dir);
+                        }
+                        _ => break,
+                    }
+                }
+                Some(acc as f64)
+            }
+            AsciiCell::Quote | AsciiCell::QuoteStream => {
+                self.collect_quoted(next, dir).parse::<f64>().ok()
             }
             _ => None,
         }
@@ -667,6 +733,7 @@ fn apply_mirror(dir: Direction, kind: MirrorKind) -> Direction {
 fn accepts_selector(cell: &AsciiCell, dir: Direction) -> bool {
     match cell {
         AsciiCell::Negate => dir == Direction::Up,
+        AsciiCell::Assertion => true,
         AsciiCell::OperatorBegin(_) => dir == Direction::Right,
         AsciiCell::OperatorEnd(_) => dir == Direction::Left,
         AsciiCell::Operator { .. } => matches!(dir, Direction::Up | Direction::Down),

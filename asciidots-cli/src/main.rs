@@ -1,5 +1,5 @@
-use asciidots_cli::{check_file, graph_file, inspect_file, run_file};
-use miette::IntoDiagnostic;
+use asciidots_cli::{WriteType, check_file, graph_file, graph_run_file, inspect_file, run_file};
+use asciidots_graph::compiler::graphsvg::graph_to_svg;
 use asciidots_tui::TuiDisplayMode;
 use clap::{
     Parser, Subcommand, ValueEnum,
@@ -8,6 +8,7 @@ use clap::{
         styling::{AnsiColor, Effects},
     },
 };
+use miette::IntoDiagnostic;
 
 fn styles() -> Styles {
     Styles::styled()
@@ -44,6 +45,8 @@ enum Commands {
         path: String,
         #[arg(long)]
         tui: bool,
+        #[arg(long)]
+        graph: bool,
         #[arg(long, default_value = "minifb")]
         display: DisplayBackend,
     },
@@ -54,6 +57,12 @@ enum Commands {
         path: String,
         #[arg(long, short)]
         output: Option<String>,
+        #[arg(long, short)]
+        svg: bool,
+        #[arg(long, short)]
+        dot: bool,
+        #[arg(long, short)]
+        json: bool,
     },
     #[command(about = "Runs and prints runtime metrics periodically")]
     Inspect {
@@ -73,13 +82,20 @@ fn main() -> miette::Result<()> {
             check_file(&path)?;
             println!("No errors found");
         }
-        Commands::Run { path, tui, display } => {
+        Commands::Run {
+            path,
+            tui,
+            graph,
+            display,
+        } => {
             if tui {
                 let display_mode = match display {
                     DisplayBackend::Minifb => TuiDisplayMode::Minifb,
                     DisplayBackend::Ratatui | DisplayBackend::None => TuiDisplayMode::Ratatui,
                 };
                 asciidots_tui::run_file(&path, display_mode)?;
+            } else if graph {
+                graph_run_file(&path, matches!(display, DisplayBackend::Minifb))?;
             } else {
                 env_logger::init();
                 run_file(&path, matches!(display, DisplayBackend::Minifb))?;
@@ -92,8 +108,23 @@ fn main() -> miette::Result<()> {
         } => {
             inspect_file(&path, every, max_steps)?;
         }
-        Commands::Graph { path, output } => {
-            let dot = graph_file(&path)?;
+        Commands::Graph {
+            path,
+            output,
+            svg,
+            json,
+            dot: dot_flag,
+        } => {
+            let t = if svg {
+                WriteType::SVG
+            } else if json {
+                WriteType::Json
+            } else if dot_flag {
+                WriteType::Graphviz
+            } else {
+                WriteType::Graphviz
+            };
+            let dot = graph_file(&path, t)?;
             match output {
                 Some(out_path) => std::fs::write(&out_path, &dot).into_diagnostic()?,
                 None => print!("{}", dot),
@@ -103,3 +134,4 @@ fn main() -> miette::Result<()> {
     }
     Ok(())
 }
+

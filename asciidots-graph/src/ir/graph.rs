@@ -1,7 +1,13 @@
-use asciidots_core::{primitives::{Direction, Orientation, Position}, state_machine::ValueSelector};
+use asciidots_core::{
+    primitives::{Direction, Orientation, Position},
+    state_machine::ValueSelector,
+};
+use rustc_hash::FxHashMap;
+use serde::Serialize;
 
 pub type NodeId = usize;
 
+#[derive(Debug)]
 pub enum PrintKind {
     Normal(String),
     Stream(String),
@@ -9,17 +15,20 @@ pub enum PrintKind {
     Value,
 }
 
+#[derive(Debug)]
 pub enum SetKind {
     Input,
     Addr(f64),
     Value(f64),
 }
 
+#[derive(Debug)]
 pub enum CallKind {
     NativeCall(String),
-    AsciiCall(String),
+    AsciiCall(u32),
 }
 
+#[derive(Debug)]
 pub enum NodeType {
     CreateDot(Direction),
     /// Per-direction print behaviour; index via dir_index()
@@ -36,13 +45,15 @@ pub enum NodeType {
     /// bool: true if negated (a `!` is positioned below the conditional)
     Conditional(bool),
     Filter(bool),
-    Assertion,
+    /// Expected value to assert against `dot.selected()`; `None` means no literal follows.
+    Assertion(Option<f64>),
     /// Pass-through node that updates the dot's active register (value or addr)
     Select(ValueSelector),
     /// Sink node — consumes dots from all directions and emits display events at runtime
     Display(u32),
 }
 
+#[derive(Debug)]
 pub struct Node {
     pub position: Position,
     pub t: NodeType,
@@ -54,6 +65,7 @@ impl Node {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum PortType {
     NORTH,
     EAST,
@@ -61,13 +73,17 @@ pub enum PortType {
     WEST,
 }
 
+#[derive(Debug)]
 pub struct Edge {
     pub from: (usize, PortType),
     pub to: (usize, PortType),
     pub ticks: u64,
 }
 
+#[derive(Debug)]
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Maps function id (u32) to the CallEnter NodeId for that function
+    pub func_entry_nodes: FxHashMap<u32, NodeId>,
 }

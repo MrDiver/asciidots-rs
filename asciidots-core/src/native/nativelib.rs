@@ -1,7 +1,7 @@
 use crate::{
     engine::dot_trait::EngineDot,
     native::native_fun::NativeFunction,
-    primitives::Orientation,
+    primitives::{Orientation, Oriented},
     state_machine::DotMachine,
 };
 
@@ -329,6 +329,44 @@ where
     fn reset(&mut self) {
         self.queued.clear();
     }
+}
+
+/// Returns the default native library typed for any compatible dot type.
+/// Use this when you need the same set of native functions for a custom dot (e.g. `GraphDot`).
+pub fn default_native_library_for<D>() -> Vec<Box<dyn NativeFunction<D>>>
+where
+    D: EngineDot<Value = f64> + Oriented + Clone + Send + Sync + 'static,
+{
+    vec![
+        Box::new(AbsNative::new()),
+        Box::new(SinNative::new()),
+        Box::new(AsinNative::new()),
+        Box::new(CosNative::new()),
+        Box::new(AcosNative::new()),
+        Box::new(TanNative::new()),
+        Box::new(AtanNative::new()),
+        Box::new(SinhNative::new()),
+        Box::new(AsinhNative::new()),
+        Box::new(CoshNative::new()),
+        Box::new(AcoshNative::new()),
+        Box::new(TanhNative::new()),
+        Box::new(AtanhNative::new()),
+        Box::new(SqrtNative::new()),
+        Box::new(CbrtNative::new()),
+        Box::new(ExpNative::new()),
+        Box::new(LnNative::new()),
+        Box::new(Log10Native::new()),
+        Box::new(FloorNative::new()),
+        Box::new(CeilNative::new()),
+        Box::new(RoundNative::new()),
+        Box::new(TruncNative::new()),
+        Box::new(SignumNative::new()),
+        Box::new(ForNative::new()),
+        Box::new(DupNative::new()),
+        Box::new(MemNative::new()),
+        Box::new(PushScopeNative::new()),
+        Box::new(PopScopeNative::new()),
+    ]
 }
 
 pub fn default_native_library() -> Vec<Box<dyn NativeFunction<DotMachine>>> {

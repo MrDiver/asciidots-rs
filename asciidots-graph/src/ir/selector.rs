@@ -5,11 +5,13 @@ pub trait ValueSelector<K, V> {
     fn set(&mut self, value: V);
 }
 
+#[derive(Clone)]
 pub enum AddrValueSelector {
     Value,
     Addr,
 }
 
+#[derive(Clone)]
 pub struct AddrValue {
     addr: f64,
     value: f64,
@@ -19,6 +21,10 @@ pub struct AddrValue {
 impl AddrValue {
     pub fn addr(&self) -> f64 {
         self.addr
+    }
+
+    pub fn set_addr(&mut self, v: f64) {
+        self.addr = v;
     }
 }
 

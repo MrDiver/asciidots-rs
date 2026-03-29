@@ -6,17 +6,41 @@ use asciidots_core::{
         queues::Pairable,
     },
     primitives::{Directed, Direction, Orientation, Oriented},
+    state_machine::ValueSelector as CoreValueSelector,
 };
 
 use crate::ir::{
     graph::NodeId,
-    selector::{AddrValue, ValueSelector},
+    selector::{AddrValue, AddrValueSelector, ValueSelector},
 };
 
+#[derive(Clone)]
 pub struct GraphDot {
     value: AddrValue,
     direction: Direction,
     callstack: Callstack<NodeId>,
+}
+
+impl GraphDot {
+    pub fn new(direction: Direction) -> Self {
+        Self {
+            value: AddrValue::default(),
+            direction,
+            callstack: Callstack::default(),
+        }
+    }
+
+    pub fn set_addr(&mut self, v: f64) {
+        self.value.set_addr(v);
+    }
+
+    /// Switches the active register without resetting.
+    pub fn apply_select(&mut self, sel: CoreValueSelector) {
+        match sel {
+            CoreValueSelector::Value => self.value.select(AddrValueSelector::Value),
+            CoreValueSelector::Addr  => self.value.select(AddrValueSelector::Addr),
+        }
+    }
 }
 
 impl EngineDot for GraphDot {

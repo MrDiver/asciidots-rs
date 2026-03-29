@@ -1,14 +1,21 @@
-use std::io::{self, Write};
 use std::collections::BTreeSet;
+use std::io::{self, Write};
 
 use asciidots_core::{
-    interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     display::DisplayBackend,
-    parser::{LexError},
+    interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     linker,
+    native::nativelib::default_native_library_for,
+    parser::LexError,
 };
 use asciidots_display_minifb::MinifbDisplayBackend;
-use asciidots_graph::compiler::{graphviz::to_graphviz, tracer::Tracer};
+use asciidots_graph::compiler::graphjson::graph_to_json;
+use asciidots_graph::compiler::graphsvg::graph_to_svg;
+use asciidots_graph::{
+    compiler::{graphviz::to_graphviz, tracer::Tracer},
+    ir::dot::GraphDot,
+    runtime::executor::GraphExecutor,
+};
 use miette::{Diagnostic, IntoDiagnostic};
 use rustc_hash::{FxHashMap, FxHashSet};
 use thiserror::Error;
@@ -20,18 +27,78 @@ pub struct LexDiagnostics {
     diagnostics: Vec<LexError>,
 }
 
-pub fn graph_file(path: &str) -> miette::Result<String> {
+pub enum WriteType {
+    Graphviz,
+    SVG,
+    Json,
+}
+
+pub fn graph_file(path: &str, t: WriteType) -> miette::Result<String> {
     let available: BTreeSet<String> = BTreeSet::new();
     let linked = linker::link_file(path.as_ref(), &available)?;
-    let native_names: FxHashSet<String> = linked
-        .native_imports
-        .keys()
-        .cloned()
-        .collect();
+    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
     let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
     tracer.trace();
     let graph = tracer.into_graph();
-    Ok(to_graphviz(&graph))
+    let res = match t {
+        WriteType::Graphviz => to_graphviz(&graph),
+        WriteType::SVG => graph_to_svg(&graph),
+        WriteType::Json => graph_to_json(&graph),
+    };
+    Ok(res)
+}
+
+pub fn graph_run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
+    let available: BTreeSet<String> = BTreeSet::new();
+    let linked = linker::link_file(path.as_ref(), &available)?;
+    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
+    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+    tracer.trace();
+    let graph = tracer.into_graph();
+
+    let native_registry = default_native_library_for::<GraphDot>()
+        .into_iter()
+        .map(|f| (f.name().to_string(), f))
+        .collect();
+    let mut executor = GraphExecutor::new(graph, native_registry);
+    let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
+
+    'outer: while !executor.is_finished() {
+        let results = executor.step();
+        let mut commands = Vec::new();
+        for result in results {
+            match result {
+                InterpreterResult::PrintChar(c) => print!("{}", c),
+                InterpreterResult::PrintLn(s) => println!("{}", s),
+                InterpreterResult::InputRequest(id) => {
+                    let mut stdout = io::stdout();
+                    print!("Input Dot({}): ", id);
+                    stdout.flush().into_diagnostic()?;
+                    let mut buffer = String::new();
+                    io::stdin().read_line(&mut buffer).into_diagnostic()?;
+                    let value: f64 = buffer.trim().parse().into_diagnostic()?;
+                    commands.push(InterpreterCommand::InputAnswer(*id, value));
+                }
+                InterpreterResult::Display {
+                    display_id,
+                    command,
+                } => {
+                    if use_minifb {
+                        let backend = display_backends
+                            .entry(*display_id)
+                            .or_insert_with(|| Box::new(MinifbDisplayBackend::new()));
+                        backend.handle(command.clone());
+                    }
+                }
+                InterpreterResult::EndProgram => break 'outer,
+            }
+        }
+        for command in commands {
+            executor.handle_command(command);
+        }
+    }
+    println!("Finished");
+    Ok(())
 }
 
 pub fn check_file(path: &str) -> miette::Result<()> {
@@ -61,7 +128,10 @@ pub fn run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
                     let value: f64 = buffer.trim().parse().into_diagnostic()?;
                     interpreter_commands.push(InterpreterCommand::InputAnswer(*uuid, value));
                 }
-                InterpreterResult::Display { display_id, command } => {
+                InterpreterResult::Display {
+                    display_id,
+                    command,
+                } => {
                     if use_minifb {
                         let backend = display_backends
                             .entry(*display_id)
