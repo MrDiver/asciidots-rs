@@ -12,6 +12,7 @@ clap = { version = "4", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 asciidots-core = {path = "../asciidots-core/"}
 asciidots-display-minifb = {path = "../asciidots-display-minifb/"}
+asciidots-graph = {path = "../asciidots-graph/"}
 rustc-hash = "2.1.1"
 asciidots-tui = {path = "../asciidots-tui/"}
 thiserror = "2.0.18"

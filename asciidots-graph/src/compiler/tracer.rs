@@ -1,18 +1,16 @@
-use std::sync::Arc;
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use asciidots_core::{
     interpreter::AsciiField,
-    native::NativeFunction,
     parser::{AsciiCell, DotsModule, MirrorKind},
     primitives::{Direction, Orientation, Position},
     state_machine::ValueSelector,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::ir::{
-    dot::GraphDot,
-    graph::{Edge, Graph, Node, NodeId, NodeType, PortType, PrintKind, SetKind, CallKind},
+use crate::ir::graph::{
+    CallKind, Edge, Graph, Node, NodeId, NodeType, PortType, PrintKind, SetKind,
 };
 
 enum FunctionKind {
@@ -24,7 +22,7 @@ pub struct Tracer {
     field: AsciiField,
     function_defs: Vec<FunctionKind>,
     function_name_to_id: FxHashMap<Arc<str>, u32>,
-    native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
+    native_names: FxHashSet<String>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     visited: FxHashSet<(Position, Direction)>,
@@ -58,7 +56,7 @@ impl Tracer {
     pub fn new(
         field: DotsModule,
         native_imports: impl IntoIterator<Item = (String, String)>,
-        native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
+        native_names: FxHashSet<String>,
     ) -> Self {
         let (asciifield, funcvec) = field.unpack();
 
@@ -85,7 +83,7 @@ impl Tracer {
             field: asciifield,
             function_defs,
             function_name_to_id,
-            native_registry,
+            native_names,
             nodes: Vec::default(),
             edges: Vec::default(),
             visited: FxHashSet::default(),
@@ -141,7 +139,12 @@ impl Tracer {
             for x in 0..width {
                 let pos: Position = (x, y).into();
                 if matches!(self.field.at(&pos), AsciiCell::Dot) {
-                    for dir in [Direction::Up, Direction::Right, Direction::Down, Direction::Left] {
+                    for dir in [
+                        Direction::Up,
+                        Direction::Right,
+                        Direction::Down,
+                        Direction::Left,
+                    ] {
                         let neighbor = pos + Position::from(dir);
                         if self.field.in_bounds(&neighbor)
                             && self.field.at(&neighbor).can_initialize(&dir.orientation())
@@ -183,10 +186,11 @@ impl Tracer {
         // no incoming edge (call jumps have no static edge)
         if td.from_call {
             let cell = self.field.at(&td.pos).clone();
-            let already_visited = !self.visited.insert((td.pos, td.direction));
-            let node_id = self.get_or_create_node(td.pos, td.direction, true, &cell);
-            if !already_visited {
-                self.spawn_outgoing(td.pos, td.direction, node_id, true, &cell, queue);
+            if let Some(node_id) = self.get_or_create_node(td.pos, td.direction, true, &cell) {
+                let already_visited = !self.visited.insert((td.pos, td.direction));
+                if !already_visited {
+                    self.spawn_outgoing(td.pos, td.direction, node_id, true, &cell, queue);
+                }
             }
             return;
         }
@@ -264,19 +268,21 @@ impl Tracer {
                 // --- Node cell: finalise edge, create/find node, spawn outgoing ---
                 cell => {
                     let cell = cell.clone();
-                    let already_visited = !self.visited.insert((next_pos, dir));
-                    let node_id = self.get_or_create_node(next_pos, dir, false, &cell);
-
-                    self.edges.push(Edge {
-                        from: (td.edge_from, td.edge_from_port),
-                        to: (node_id, entry_port(dir)),
-                        ticks,
-                    });
-
-                    if !already_visited {
-                        self.spawn_outgoing(next_pos, dir, node_id, false, &cell, queue);
+                    if let Some(node_id) = self.get_or_create_node(next_pos, dir, false, &cell) {
+                        let already_visited = !self.visited.insert((next_pos, dir));
+                        self.edges.push(Edge {
+                            from: (td.edge_from, td.edge_from_port),
+                            to: (node_id, entry_port(dir)),
+                            ticks,
+                        });
+                        if !already_visited {
+                            self.spawn_outgoing(next_pos, dir, node_id, false, &cell, queue);
+                        }
+                        return;
                     }
-                    return;
+                    // None: cell is present but produces no node (e.g. bare $) — treat as passthrough
+                    ticks += 1;
+                    pos = next_pos;
                 }
             }
         }
@@ -288,104 +294,110 @@ impl Tracer {
         dir: Direction,
         from_call: bool,
         cell: &AsciiCell,
-    ) -> NodeId {
+    ) -> Option<NodeId> {
         match cell {
             // --- Direction-slot nodes ---
             AsciiCell::Write => {
-                let kind = self.collect_print_kind(pos, dir);
+                let kind = self.collect_print_kind(pos, dir)?;
                 if let Some(&id) = self.position_nodes.get(&pos) {
                     if let NodeType::Print(ref mut slots) = self.nodes[id].t {
                         slots[dir_index(dir)].get_or_insert(kind);
                     }
-                    id
+                    Some(id)
                 } else {
                     let mut slots: [Option<PrintKind>; 4] = [None, None, None, None];
                     slots[dir_index(dir)] = Some(kind);
                     let id = self.nodes.len();
                     self.nodes.push(Node::new(pos, NodeType::Print(slots)));
                     self.position_nodes.insert(pos, id);
-                    id
+                    Some(id)
                 }
             }
 
             AsciiCell::ValueMarker | AsciiCell::AddrMarker => {
                 let kind = self.collect_set_kind(pos, dir, cell);
                 if let Some(kind) = kind {
-                    // has digits after — Set node
+                    // has digits/input after — Set node
                     if let Some(&id) = self.position_nodes.get(&pos) {
                         if let NodeType::Set(ref mut slots) = self.nodes[id].t {
                             slots[dir_index(dir)].get_or_insert(kind);
                         }
-                        id
+                        Some(id)
                     } else {
                         let mut slots: [Option<SetKind>; 4] = [None, None, None, None];
                         slots[dir_index(dir)] = Some(kind);
                         let id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::Set(slots)));
                         self.position_nodes.insert(pos, id);
-                        id
+                        Some(id)
                     }
                 } else {
-                    // no digits — Select node (position-only)
-                    let selector = match cell {
-                        AsciiCell::ValueMarker => ValueSelector::Value,
-                        _ => ValueSelector::Addr,
-                    };
-                    self.get_or_insert_pos(pos, NodeType::Select(selector))
+                    // no digits — Select node only if the next cell can use a selector
+                    let next = pos + Position::from(dir);
+                    if self.field.in_bounds(&next) && accepts_selector(self.field.at(&next), dir) {
+                        let selector = match cell {
+                            AsciiCell::ValueMarker => ValueSelector::Value,
+                            _ => ValueSelector::Addr,
+                        };
+                        Some(self.get_or_insert_pos(pos, NodeType::Select(selector)))
+                    } else {
+                        None
+                    }
                 }
             }
 
             // --- Position-only nodes ---
             AsciiCell::Operator { repr, orientation } => {
-                self.get_or_insert_pos(pos, NodeType::Operator(*repr, *orientation))
+                Some(self.get_or_insert_pos(pos, NodeType::Operator(*repr, *orientation)))
             }
-            AsciiCell::Duplicate => self.get_or_insert_pos(pos, NodeType::Duplicate),
-            AsciiCell::StopProgram => self.get_or_insert_pos(pos, NodeType::EndProgram),
+            AsciiCell::Duplicate => Some(self.get_or_insert_pos(pos, NodeType::Duplicate)),
+            AsciiCell::StopProgram => Some(self.get_or_insert_pos(pos, NodeType::EndProgram)),
             AsciiCell::Conditional(_) => {
                 let negated = self.is_negated(pos);
-                self.get_or_insert_pos(pos, NodeType::Conditional(negated))
+                Some(self.get_or_insert_pos(pos, NodeType::Conditional(negated)))
             }
-            AsciiCell::Filter(b) => self.get_or_insert_pos(pos, NodeType::Filter(*b)),
-            AsciiCell::Assertion => self.get_or_insert_pos(pos, NodeType::Assertion),
-            AsciiCell::Display(id) => self.get_or_insert_pos(pos, NodeType::Display(*id)),
+            AsciiCell::Filter(b) => Some(self.get_or_insert_pos(pos, NodeType::Filter(*b))),
+            AsciiCell::Assertion => Some(self.get_or_insert_pos(pos, NodeType::Assertion)),
+            AsciiCell::Display(id) => Some(self.get_or_insert_pos(pos, NodeType::Display(*id))),
 
             AsciiCell::Call(name) => {
-                let call_kind = if self.native_registry.contains_key(name.as_ref()) {
+                let call_kind = if self.native_names.contains(name.as_ref()) {
                     CallKind::NativeCall(name.to_string())
                 } else {
                     CallKind::AsciiCall(name.to_string())
                 };
-                self.get_or_insert_pos(pos, NodeType::Call(call_kind))
+                Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
             AsciiCell::CallById(id) => {
                 let call_kind = match self.function_defs.get(*id as usize) {
                     Some(FunctionKind::Native(name)) => CallKind::NativeCall(name.clone()),
                     Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(id.to_string()),
                 };
-                self.get_or_insert_pos(pos, NodeType::Call(call_kind))
+                Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
 
             AsciiCell::DefRet(name) => {
                 if from_call {
-                    let func_id = self.function_name_to_id
+                    let func_id = self
+                        .function_name_to_id
                         .get(name.as_str())
                         .copied()
                         .unwrap_or(u32::MAX);
                     if let Some(&id) = self.func_entry_map.get(&func_id) {
-                        id
+                        Some(id)
                     } else {
                         let id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::CallEnter));
                         self.position_nodes.insert(pos, id);
                         self.func_entry_map.insert(func_id, id);
-                        id
+                        Some(id)
                     }
                 } else {
-                    self.get_or_insert_pos(pos, NodeType::Return)
+                    Some(self.get_or_insert_pos(pos, NodeType::Return))
                 }
             }
 
-            _ => unreachable!("non-node cell reached get_or_create_node"),
+            _ => None,
         }
     }
 
@@ -400,8 +412,30 @@ impl Tracer {
     ) {
         match cell {
             // --- Single pass-through ---
-            AsciiCell::Write
-            | AsciiCell::ValueMarker
+            AsciiCell::Write => {
+                // If the cell ahead is a #/@ modifier it was already consumed to
+                // determine the PrintKind; skip over it so the outgoing dot doesn't
+                // land on it and create a spurious Select node.
+                let modifier_pos = pos + Position::from(dir);
+                if self.field.in_bounds(&modifier_pos)
+                    && matches!(
+                        self.field.at(&modifier_pos),
+                        AsciiCell::ValueMarker | AsciiCell::AddrMarker
+                    )
+                {
+                    queue.push_back(TracingDot {
+                        pos: modifier_pos,
+                        direction: dir,
+                        from_call: false,
+                        edge_from: node_id,
+                        edge_from_port: exit_port(dir),
+                        edge_ticks: 1,
+                    });
+                } else {
+                    self.enqueue_tracer(pos, dir, node_id, queue);
+                }
+            }
+            AsciiCell::ValueMarker
             | AsciiCell::AddrMarker
             | AsciiCell::Filter(_)
             | AsciiCell::Assertion => {
@@ -418,8 +452,13 @@ impl Tracer {
 
             // --- Duplicate: all three non-entry directions ---
             AsciiCell::Duplicate => {
-                for out_dir in [Direction::Up, Direction::Down, Direction::Left, Direction::Right] {
-                    if out_dir != dir {
+                for out_dir in [
+                    Direction::Up,
+                    Direction::Down,
+                    Direction::Left,
+                    Direction::Right,
+                ] {
+                    if out_dir != dir.reverse() {
                         self.enqueue_tracer(pos, out_dir, node_id, queue);
                     }
                 }
@@ -440,31 +479,34 @@ impl Tracer {
                 }
             }
 
-// --- CallById: native emits in all four directions; ascii continues + jumps to body ---
-            AsciiCell::CallById(id) => {
-                match self.function_defs.get(*id as usize) {
-                    Some(FunctionKind::Native(_)) => {
-                        for out_dir in [Direction::Up, Direction::Down, Direction::Left, Direction::Right] {
-                            self.enqueue_tracer(pos, out_dir, node_id, queue);
-                        }
+            // --- CallById: native emits in all four directions; ascii continues + jumps to body ---
+            AsciiCell::CallById(id) => match self.function_defs.get(*id as usize) {
+                Some(FunctionKind::Native(_)) => {
+                    for out_dir in [
+                        Direction::Up,
+                        Direction::Down,
+                        Direction::Left,
+                        Direction::Right,
+                    ] {
+                        self.enqueue_tracer(pos, out_dir, node_id, queue);
                     }
-                    Some(FunctionKind::Ascii(defret_pos)) => {
-                        self.enqueue_tracer(pos, dir, node_id, queue);
-                        let defret_pos = *defret_pos;
-                        if !self.func_entry_map.contains_key(id) {
-                            queue.push_back(TracingDot {
-                                pos: defret_pos,
-                                direction: dir,
-                                from_call: true,
-                                edge_from: node_id,
-                                edge_from_port: exit_port(dir),
-                                edge_ticks: 0,
-                            });
-                        }
-                    }
-                    None => {}
                 }
-            }
+                Some(FunctionKind::Ascii(defret_pos)) => {
+                    self.enqueue_tracer(pos, dir, node_id, queue);
+                    let defret_pos = *defret_pos;
+                    if !self.func_entry_map.contains_key(id) {
+                        queue.push_back(TracingDot {
+                            pos: defret_pos,
+                            direction: dir,
+                            from_call: true,
+                            edge_from: node_id,
+                            edge_from_port: exit_port(dir),
+                            edge_ticks: 0,
+                        });
+                    }
+                }
+                None => {}
+            },
 
             // --- Sinks: no outgoing dots ---
             AsciiCell::StopProgram | AsciiCell::Display(_) => {}
@@ -495,17 +537,19 @@ impl Tracer {
         self.field.in_bounds(&below) && matches!(self.field.at(&below), AsciiCell::Negate)
     }
 
-    fn collect_print_kind(&self, pos: Position, dir: Direction) -> PrintKind {
+    fn collect_print_kind(&self, pos: Position, dir: Direction) -> Option<PrintKind> {
         let modifier_pos = pos + Position::from(dir);
         if !self.field.in_bounds(&modifier_pos) {
-            return PrintKind::Value;
+            return None;
         }
         match self.field.at(&modifier_pos) {
-            AsciiCell::ValueMarker  => PrintKind::Value,
-            AsciiCell::AddrMarker   => PrintKind::Addr,
-            AsciiCell::Quote        => PrintKind::Normal(self.collect_quoted(modifier_pos, dir)),
-            AsciiCell::QuoteStream  => PrintKind::Stream(self.collect_quoted(modifier_pos, dir)),
-            _                       => PrintKind::Value,
+            AsciiCell::ValueMarker => Some(PrintKind::Value),
+            AsciiCell::AddrMarker => Some(PrintKind::Addr),
+            AsciiCell::Quote => Some(PrintKind::Normal(self.collect_quoted(modifier_pos, dir))),
+            AsciiCell::QuoteStream => {
+                Some(PrintKind::Stream(self.collect_quoted(modifier_pos, dir)))
+            }
+            _ => None,
         }
     }
 
@@ -530,12 +574,20 @@ impl Tracer {
                     }
                 }
                 let v = acc as f64;
-                Some(if is_value { SetKind::Value(v) } else { SetKind::Addr(v) })
+                Some(if is_value {
+                    SetKind::Value(v)
+                } else {
+                    SetKind::Addr(v)
+                })
             }
             AsciiCell::Quote | AsciiCell::QuoteStream => {
                 let s = self.collect_quoted(next, dir);
                 let v: f64 = s.parse().unwrap_or(0.0);
-                Some(if is_value { SetKind::Value(v) } else { SetKind::Addr(v) })
+                Some(if is_value {
+                    SetKind::Value(v)
+                } else {
+                    SetKind::Addr(v)
+                })
             }
             _ => None,
         }
@@ -566,40 +618,57 @@ impl Tracer {
 
 fn dir_index(dir: Direction) -> usize {
     match dir {
-        Direction::Up    => 0,
-        Direction::Down  => 1,
-        Direction::Left  => 2,
+        Direction::Up => 0,
+        Direction::Down => 1,
+        Direction::Left => 2,
         Direction::Right => 3,
     }
 }
 
 fn entry_port(dir: Direction) -> PortType {
     match dir {
-        Direction::Up    => PortType::SOUTH,
-        Direction::Down  => PortType::NORTH,
-        Direction::Left  => PortType::EAST,
+        Direction::Up => PortType::SOUTH,
+        Direction::Down => PortType::NORTH,
+        Direction::Left => PortType::EAST,
         Direction::Right => PortType::WEST,
     }
 }
 
 fn exit_port(dir: Direction) -> PortType {
     match dir {
-        Direction::Up    => PortType::NORTH,
-        Direction::Down  => PortType::SOUTH,
-        Direction::Left  => PortType::WEST,
+        Direction::Up => PortType::NORTH,
+        Direction::Down => PortType::SOUTH,
+        Direction::Left => PortType::WEST,
         Direction::Right => PortType::EAST,
     }
 }
 
 fn apply_mirror(dir: Direction, kind: MirrorKind) -> Direction {
     match (dir, kind) {
-        (Direction::Up,    MirrorKind::Forward)  => Direction::Right,
-        (Direction::Down,  MirrorKind::Forward)  => Direction::Left,
-        (Direction::Right, MirrorKind::Forward)  => Direction::Up,
-        (Direction::Left,  MirrorKind::Forward)  => Direction::Down,
-        (Direction::Up,    MirrorKind::Backward) => Direction::Left,
-        (Direction::Down,  MirrorKind::Backward) => Direction::Right,
+        (Direction::Up, MirrorKind::Forward) => Direction::Right,
+        (Direction::Down, MirrorKind::Forward) => Direction::Left,
+        (Direction::Right, MirrorKind::Forward) => Direction::Up,
+        (Direction::Left, MirrorKind::Forward) => Direction::Down,
+        (Direction::Up, MirrorKind::Backward) => Direction::Left,
+        (Direction::Down, MirrorKind::Backward) => Direction::Right,
         (Direction::Right, MirrorKind::Backward) => Direction::Down,
-        (Direction::Left,  MirrorKind::Backward) => Direction::Up,
+        (Direction::Left, MirrorKind::Backward) => Direction::Up,
+    }
+}
+
+/// Returns true if `cell` can receive a value/addr selector arriving from `dir`.
+///
+/// - `OperatorBegin`: entered from the left (dot traveling Right)
+/// - `OperatorEnd`:   entered from the right (dot traveling Left)
+/// - `Operator`:      vertical operands (dot traveling Up or Down)
+/// - `Conditional`:   condition dot enters from below (dot traveling Up)
+fn accepts_selector(cell: &AsciiCell, dir: Direction) -> bool {
+    match cell {
+        AsciiCell::Negate => dir == Direction::Up,
+        AsciiCell::OperatorBegin(_) => dir == Direction::Right,
+        AsciiCell::OperatorEnd(_) => dir == Direction::Left,
+        AsciiCell::Operator { .. } => matches!(dir, Direction::Up | Direction::Down),
+        AsciiCell::Conditional(_) => dir == Direction::Up,
+        _ => false,
     }
 }

@@ -1,4 +1,5 @@
-use asciidots_cli::{check_file, inspect_file, run_file};
+use asciidots_cli::{check_file, graph_file, inspect_file, run_file};
+use miette::IntoDiagnostic;
 use asciidots_tui::TuiDisplayMode;
 use clap::{
     Parser, Subcommand, ValueEnum,
@@ -48,6 +49,12 @@ enum Commands {
     },
     #[command(about = "Compiles the file (for the asciidots vm)")]
     Build { path: String },
+    #[command(about = "Outputs a GraphViz DOT graph of the program's dataflow")]
+    Graph {
+        path: String,
+        #[arg(long, short)]
+        output: Option<String>,
+    },
     #[command(about = "Runs and prints runtime metrics periodically")]
     Inspect {
         path: String,
@@ -84,6 +91,13 @@ fn main() -> miette::Result<()> {
             max_steps,
         } => {
             inspect_file(&path, every, max_steps)?;
+        }
+        Commands::Graph { path, output } => {
+            let dot = graph_file(&path)?;
+            match output {
+                Some(out_path) => std::fs::write(&out_path, &dot).into_diagnostic()?,
+                None => print!("{}", dot),
+            }
         }
         _ => todo!(),
     }

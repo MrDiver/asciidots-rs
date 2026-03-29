@@ -133,6 +133,7 @@ version = "0.1.0"
 dependencies = [
  "asciidots-core",
  "asciidots-display-minifb",
+ "asciidots-graph",
  "asciidots-tui",
  "clap",
  "env_logger",

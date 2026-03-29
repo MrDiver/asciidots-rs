@@ -1,13 +1,16 @@
 use std::io::{self, Write};
+use std::collections::BTreeSet;
 
 use asciidots_core::{
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     display::DisplayBackend,
     parser::{LexError},
+    linker,
 };
 use asciidots_display_minifb::MinifbDisplayBackend;
+use asciidots_graph::compiler::{graphviz::to_graphviz, tracer::Tracer};
 use miette::{Diagnostic, IntoDiagnostic};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -15,6 +18,20 @@ use thiserror::Error;
 pub struct LexDiagnostics {
     #[related]
     diagnostics: Vec<LexError>,
+}
+
+pub fn graph_file(path: &str) -> miette::Result<String> {
+    let available: BTreeSet<String> = BTreeSet::new();
+    let linked = linker::link_file(path.as_ref(), &available)?;
+    let native_names: FxHashSet<String> = linked
+        .native_imports
+        .keys()
+        .cloned()
+        .collect();
+    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+    tracer.trace();
+    let graph = tracer.into_graph();
+    Ok(to_graphviz(&graph))
 }
 
 pub fn check_file(path: &str) -> miette::Result<()> {
