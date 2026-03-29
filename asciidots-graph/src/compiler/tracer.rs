@@ -388,7 +388,9 @@ impl Tracer {
                     } else {
                         let id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::CallEnter));
-                        self.position_nodes.insert(pos, id);
+                        // Intentionally NOT inserted into position_nodes:
+                        // the same DefRet position visited with from_call=false
+                        // must create a distinct Return node via get_or_insert_pos.
                         self.func_entry_map.insert(func_id, id);
                         Some(id)
                     }
