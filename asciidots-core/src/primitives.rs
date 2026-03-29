@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum Direction {
     Up,
     Down,

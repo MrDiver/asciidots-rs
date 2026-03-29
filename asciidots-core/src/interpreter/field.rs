@@ -104,6 +104,12 @@ impl AsciiField {
     pub fn height(&self) -> usize {
         self.height
     }
+
+    #[inline]
+    pub fn in_bounds(&self, position: &Position) -> bool {
+        let &Position { x, y } = position;
+        x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height
+    }
 }
 
 pub struct FieldIterator<'a> {

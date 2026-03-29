@@ -1,9 +1,4 @@
-use asciidots_core::{
-    engine::operator::{ConditionalOperator, Operator},
-    primitives::Position,
-};
-
-use crate::ir::dot::GraphDot;
+use asciidots_core::{primitives::{Direction, Orientation, Position}, state_machine::ValueSelector};
 
 pub type NodeId = usize;
 
@@ -26,19 +21,31 @@ pub enum CallKind {
 }
 
 pub enum NodeType {
-    Print(PrintKind),
-    Set(SetKind),
+    CreateDot(Direction),
+    /// Per-direction print behaviour; index via dir_index()
+    Print([Option<PrintKind>; 4]),
+    /// Per-direction set behaviour; index via dir_index()
+    Set([Option<SetKind>; 4]),
     Duplicate,
-    Dead,
+    EndProgram,
     Call(CallKind),
+    CallEnter,
     Return,
-    Operator(Operator<GraphDot, f64>),
-    Conditonal(ConditionalOperator<GraphDot>),
+    /// repr is the operator character, orientation is the primary axis
+    Operator(char, Orientation),
+    /// bool: true if negated (a `!` is positioned below the conditional)
+    Conditional(bool),
+    Filter(bool),
+    Assertion,
+    /// Pass-through node that updates the dot's active register (value or addr)
+    Select(ValueSelector),
+    /// Sink node — consumes dots from all directions and emits display events at runtime
+    Display(u32),
 }
 
 pub struct Node {
-    position: Position,
-    t: NodeType,
+    pub position: Position,
+    pub t: NodeType,
 }
 
 impl Node {
@@ -55,12 +62,12 @@ pub enum PortType {
 }
 
 pub struct Edge {
-    from: (usize, PortType),
-    to: (usize, PortType),
-    ticks: u64,
+    pub from: (usize, PortType),
+    pub to: (usize, PortType),
+    pub ticks: u64,
 }
 
 pub struct Graph {
-    nodes: Vec<Node>,
-    edges: Vec<Edge>,
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
 }
