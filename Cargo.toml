@@ -4,6 +4,7 @@ members = [
 	"asciidots-cli",
 	"asciidots-tui",
 	"asciidots-graph",
+	"asciidots-graph-tui",
 	"asciidots-display-minifb",
 	"asciidots-display-ratatui",
 ]

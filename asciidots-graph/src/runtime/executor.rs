@@ -3,6 +3,8 @@
 // from-node and to-node based on ticks_left/ticks. Reuse the existing asciidots-tui
 // infrastructure but feed it graph IR instead of the raw AsciiField.
 
+use std::collections::VecDeque;
+
 use rustc_hash::FxHashMap;
 
 use asciidots_core::{
@@ -20,9 +22,49 @@ use crate::ir::{
     graph::{CallKind, Graph, NodeId, NodeType, PortType, PrintKind, SetKind},
 };
 
+const DEBUG_BUFFER_LIMIT: usize = 128;
+
+#[derive(Debug, Clone)]
+pub struct NodeVisitRecord {
+    pub step: u64,
+    pub node_id: NodeId,
+    pub direction: Direction,
+    pub selected: f64,
+    pub addr: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeadEndRecord {
+    pub step: u64,
+    pub from_node: NodeId,
+    pub direction: Direction,
+    pub selected: f64,
+    pub addr: f64,
+}
+
 struct PendingDot {
     dot: GraphDot,
+    from_node: NodeId,
     dest_node: NodeId,
+    total_ticks: u64,
+    ticks_left: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingDotSnapshot {
+    pub from_node: NodeId,
+    pub dest_node: NodeId,
+    pub total_ticks: u64,
+    pub ticks_left: u64,
+    pub direction: Direction,
+    pub selected: f64,
+    pub addr: f64,
+}
+
+struct DeferredPrint {
+    result: InterpreterResult,
+    dot: GraphDot,
+    from_node: NodeId,
     ticks_left: u64,
 }
 
@@ -31,6 +73,7 @@ pub struct GraphExecutor {
     /// Outgoing edge indices per node, indexed by NodeId.
     outgoing: Vec<Vec<usize>>,
     pending: Vec<PendingDot>,
+    deferred_prints: Vec<DeferredPrint>,
     operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>>,
     conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
@@ -42,6 +85,9 @@ pub struct GraphExecutor {
     finished: bool,
     /// Consecutive steps where no dots were active; finish after threshold.
     empty_steps: usize,
+    step_counter: u64,
+    recent_visits: VecDeque<NodeVisitRecord>,
+    recent_dead_ends: VecDeque<DeadEndRecord>,
 }
 
 impl GraphExecutor {
@@ -88,6 +134,7 @@ impl GraphExecutor {
         let mut executor = Self {
             outgoing,
             pending: Vec::new(),
+            deferred_prints: Vec::new(),
             operator_queues,
             conditional_queues,
             native_registry,
@@ -97,6 +144,9 @@ impl GraphExecutor {
             results: Vec::new(),
             finished: false,
             empty_steps: 0,
+            step_counter: 0,
+            recent_visits: VecDeque::with_capacity(DEBUG_BUFFER_LIMIT),
+            recent_dead_ends: VecDeque::with_capacity(DEBUG_BUFFER_LIMIT),
             graph,
         };
 
@@ -119,8 +169,40 @@ impl GraphExecutor {
         self.pending.len()
     }
 
+    pub fn graph(&self) -> &Graph {
+        &self.graph
+    }
+
+    pub fn pending_snapshots(&self) -> Vec<PendingDotSnapshot> {
+        self.pending
+            .iter()
+            .map(|pd| PendingDotSnapshot {
+                from_node: pd.from_node,
+                dest_node: pd.dest_node,
+                total_ticks: pd.total_ticks,
+                ticks_left: pd.ticks_left,
+                direction: pd.dot.direction(),
+                selected: pd.dot.selected(),
+                addr: pd.dot.addr(),
+            })
+            .collect()
+    }
+
     pub fn step(&mut self) -> &[InterpreterResult] {
+        self.step_counter += 1;
         self.results.clear();
+
+        let mut i = 0;
+        while i < self.deferred_prints.len() {
+            if self.deferred_prints[i].ticks_left == 0 {
+                let deferred = self.deferred_prints.swap_remove(i);
+                self.results.push(deferred.result);
+                self.forward_dot(deferred.dot, deferred.from_node);
+            } else {
+                self.deferred_prints[i].ticks_left -= 1;
+                i += 1;
+            }
+        }
 
         // Collect returns from native functions.
         self.collect_native_returns();
@@ -156,6 +238,42 @@ impl GraphExecutor {
         &self.results
     }
 
+    pub fn debug_recent_visits(&self) -> Vec<NodeVisitRecord> {
+        self.recent_visits.iter().cloned().collect()
+    }
+
+    pub fn debug_recent_dead_ends(&self) -> Vec<DeadEndRecord> {
+        self.recent_dead_ends.iter().cloned().collect()
+    }
+
+    pub fn debug_node_summary(&self, node_id: NodeId) -> String {
+        let node = &self.graph.nodes[node_id];
+        format!(
+            "node#{node_id} @ ({}, {}) {}",
+            node.position.x,
+            node.position.y,
+            node_type_name(&node.t)
+        )
+    }
+
+    pub fn debug_node_ports(&self, node_id: NodeId) -> (Vec<PortType>, Vec<PortType>) {
+        let incoming = self
+            .graph
+            .edges
+            .iter()
+            .filter(|edge| edge.to.0 == node_id)
+            .map(|edge| edge.to.1)
+            .collect();
+        let outgoing = self
+            .graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from.0 == node_id)
+            .map(|edge| edge.from.1)
+            .collect();
+        (incoming, outgoing)
+    }
+
     pub fn handle_command(&mut self, command: InterpreterCommand) {
         match command {
             InterpreterCommand::InputAnswer(id, value) => {
@@ -184,6 +302,13 @@ impl GraphExecutor {
     }
 
     fn process_dot(&mut self, mut dot: GraphDot, node_id: NodeId) {
+        self.push_visit(NodeVisitRecord {
+            step: self.step_counter,
+            node_id,
+            direction: dot.direction(),
+            selected: dot.selected(),
+            addr: dot.addr(),
+        });
         match &self.graph.nodes[node_id].t {
             NodeType::CreateDot(_) => {
                 // Should not be reached at runtime — dots are seeded at construction.
@@ -206,7 +331,16 @@ impl GraphExecutor {
                             self.results
                                 .push(InterpreterResult::PrintLn(dot.addr().to_string()));
                         }
-                        PrintKind::Normal(s) | PrintKind::Stream(s) => {
+                        PrintKind::Normal(s) => {
+                            self.deferred_prints.push(DeferredPrint {
+                                result: InterpreterResult::PrintLn(s.clone()),
+                                dot,
+                                from_node: node_id,
+                                ticks_left: s.chars().count() as u64,
+                            });
+                            return;
+                        }
+                        PrintKind::Stream(s) => {
                             for c in s.chars() {
                                 self.results.push(InterpreterResult::PrintChar(c));
                             }
@@ -263,7 +397,9 @@ impl GraphExecutor {
                     clone.set_direction(arrival_dir);
                     self.pending.push(PendingDot {
                         dot: clone,
+                        from_node: node_id,
                         dest_node: dest,
+                        total_ticks: ticks,
                         ticks_left: ticks,
                     });
                 }
@@ -352,7 +488,9 @@ impl GraphExecutor {
                         clone.set_direction(arrival_dir);
                         self.pending.push(PendingDot {
                             dot: clone,
+                            from_node: call_node_id,
                             dest_node: dest,
+                            total_ticks: ticks,
                             ticks_left: ticks,
                         });
                     }
@@ -373,7 +511,9 @@ impl GraphExecutor {
                     if let Some(&entry_node) = self.graph.func_entry_nodes.get(&id) {
                         self.pending.push(PendingDot {
                             dot,
+                            from_node: node_id,
                             dest_node: entry_node,
+                            total_ticks: 0,
                             ticks_left: 0,
                         });
                     }
@@ -401,13 +541,54 @@ impl GraphExecutor {
                 dot.set_direction(arrival_dir);
                 self.pending.push(PendingDot {
                     dot,
+                    from_node,
                     dest_node: dest,
+                    total_ticks: ticks,
                     ticks_left: ticks,
                 });
                 return;
             }
         }
-        // No matching edge — dot travels off the graph and dies.
+        self.push_dead_end(DeadEndRecord {
+            step: self.step_counter,
+            from_node,
+            direction: dir,
+            selected: dot.selected(),
+            addr: dot.addr(),
+        });
+    }
+
+    fn push_visit(&mut self, visit: NodeVisitRecord) {
+        if self.recent_visits.len() == DEBUG_BUFFER_LIMIT {
+            self.recent_visits.pop_front();
+        }
+        self.recent_visits.push_back(visit);
+    }
+
+    fn push_dead_end(&mut self, dead_end: DeadEndRecord) {
+        if self.recent_dead_ends.len() == DEBUG_BUFFER_LIMIT {
+            self.recent_dead_ends.pop_front();
+        }
+        self.recent_dead_ends.push_back(dead_end);
+    }
+}
+
+fn node_type_name(node_type: &NodeType) -> &'static str {
+    match node_type {
+        NodeType::CreateDot(_) => "CreateDot",
+        NodeType::Print(_) => "Print",
+        NodeType::Set(_) => "Set",
+        NodeType::Duplicate => "Duplicate",
+        NodeType::EndProgram => "EndProgram",
+        NodeType::Call(_) => "Call",
+        NodeType::CallEnter => "CallEnter",
+        NodeType::Return => "Return",
+        NodeType::Operator(_, _) => "Operator",
+        NodeType::Conditional(_) => "Conditional",
+        NodeType::Filter(_) => "Filter",
+        NodeType::Assertion(_) => "Assertion",
+        NodeType::Select(_) => "Select",
+        NodeType::Display(_) => "Display",
     }
 }
 

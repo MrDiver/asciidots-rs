@@ -12,6 +12,13 @@ use asciidots_graph::{
 };
 use rustc_hash::FxHashSet;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DisplayEventRecord {
+    step: usize,
+    display_id: u32,
+    command: String,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -42,6 +49,14 @@ struct DisplayState {
     color_modes: BTreeMap<u32, u8>,
     /// (display_id, pixel_index) → last value written (f64 bits)
     pixels: BTreeMap<(u32, usize), u64>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DisplayEventCounts {
+    widths: usize,
+    heights: usize,
+    color_modes: usize,
+    pixels: usize,
 }
 
 fn color_mode_discriminant(m: &ColorMode) -> u8 {
@@ -94,6 +109,27 @@ fn collect_graph(path: &PathBuf, max_ticks: usize) -> DisplayState {
     state
 }
 
+fn collect_graph_counts(path: &PathBuf, max_ticks: usize) -> DisplayEventCounts {
+    let mut executor = build_executor(path);
+    let mut counts = DisplayEventCounts::default();
+    for _ in 0..max_ticks {
+        if executor.is_finished() {
+            break;
+        }
+        for result in executor.step().to_vec() {
+            if let InterpreterResult::Display { command, .. } = result {
+                match command {
+                    DisplayCommand::SetWidth(_) => counts.widths += 1,
+                    DisplayCommand::SetHeight(_) => counts.heights += 1,
+                    DisplayCommand::SetColorMode(_) => counts.color_modes += 1,
+                    DisplayCommand::SetPixel { .. } => counts.pixels += 1,
+                }
+            }
+        }
+    }
+    counts
+}
+
 fn collect_core(path: &PathBuf, max_ticks: usize) -> DisplayState {
     let mut interpreter = DotsInterpreterBuilder::new()
         .build_from_file(path)
@@ -115,6 +151,80 @@ fn collect_core(path: &PathBuf, max_ticks: usize) -> DisplayState {
         }
     }
     state
+}
+
+fn collect_graph_output(path: &PathBuf, max_ticks: usize) -> Vec<String> {
+    let mut executor = build_executor(path);
+    let mut output = Vec::new();
+    for _ in 0..max_ticks {
+        if executor.is_finished() {
+            break;
+        }
+        for result in executor.step().to_vec() {
+            match result {
+                InterpreterResult::PrintChar(c) => output.push(c.to_string()),
+                InterpreterResult::PrintLn(line) => output.push(line.to_string()),
+                _ => {}
+            }
+        }
+    }
+    output
+}
+
+fn collect_core_output(path: &PathBuf, max_ticks: usize) -> Vec<String> {
+    let mut interpreter = DotsInterpreterBuilder::new()
+        .build_from_file(path)
+        .expect("core interpreter failed to initialize");
+    let mut output = Vec::new();
+    for _ in 0..max_ticks {
+        if interpreter.is_finished() {
+            break;
+        }
+        let results = interpreter.step().expect("core interpreter step error");
+        for result in results {
+            match result {
+                InterpreterResult::PrintChar(c) => output.push(c.to_string()),
+                InterpreterResult::PrintLn(line) => output.push(line.to_string()),
+                _ => {}
+            }
+        }
+    }
+    output
+}
+
+fn collect_core_counts(path: &PathBuf, max_ticks: usize) -> DisplayEventCounts {
+    let mut interpreter = DotsInterpreterBuilder::new()
+        .build_from_file(path)
+        .expect("core interpreter failed to initialize");
+    let mut counts = DisplayEventCounts::default();
+    for _ in 0..max_ticks {
+        if interpreter.is_finished() {
+            break;
+        }
+        let results = interpreter.step().expect("core interpreter step error");
+        for result in results {
+            if let InterpreterResult::Display { command, .. } = result {
+                match command {
+                    DisplayCommand::SetWidth(_) => counts.widths += 1,
+                    DisplayCommand::SetHeight(_) => counts.heights += 1,
+                    DisplayCommand::SetColorMode(_) => counts.color_modes += 1,
+                    DisplayCommand::SetPixel { .. } => counts.pixels += 1,
+                }
+            }
+        }
+    }
+    counts
+}
+
+fn format_display_command(command: &DisplayCommand) -> String {
+    match command {
+        DisplayCommand::SetWidth(v) => format!("SetWidth({v})"),
+        DisplayCommand::SetHeight(v) => format!("SetHeight({v})"),
+        DisplayCommand::SetColorMode(mode) => format!("SetColorMode({mode:?})"),
+        DisplayCommand::SetPixel { index, value } => {
+            format!("SetPixel(index={index}, value={value})")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +291,30 @@ fn display_fixture_graph_matches_core() {
     );
 }
 
+#[test]
+fn duplicate_sample_graph_matches_core_output() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/duplicate.dots");
+    let core_output = collect_core_output(&path, 1_000);
+    let graph_output = collect_graph_output(&path, 1_000);
+
+    assert_eq!(
+        core_output, graph_output,
+        "duplicate sample output mismatch\ncore={core_output:?}\ngraph={graph_output:?}"
+    );
+}
+
+#[test]
+fn duplicate_one_dir_sample_graph_matches_core_output() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/duplicate_one_dir.dots");
+    let core_output = collect_core_output(&path, 1_000);
+    let graph_output = collect_graph_output(&path, 1_000);
+
+    assert_eq!(
+        core_output, graph_output,
+        "duplicate_one_dir sample output mismatch\ncore={core_output:?}\ngraph={graph_output:?}"
+    );
+}
+
 /// Runs both runtimes on juliaset_small.dots for 1000 steps and asserts the accumulated
 /// display state matches (juliaset runs indefinitely so we snapshot at a fixed step count).
 #[test]
@@ -219,12 +353,32 @@ fn juliaset_small_graph_matches_core() {
     );
 }
 
+#[test]
+fn juliaset_small_event_counts_match_expected() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/graph_juliaset_small.dots");
+    let core_counts = collect_core_counts(&path, 5_000);
+    let graph_counts = collect_graph_counts(&path, 5_000);
+
+    let expected = DisplayEventCounts {
+        widths: 1,
+        heights: 1,
+        color_modes: 1,
+        pixels: 100,
+    };
+
+    assert_eq!(core_counts, expected, "core event counts changed unexpectedly");
+    assert_eq!(graph_counts, expected, "graph event counts changed unexpectedly");
+}
+
 /// Diagnostic: traces both runtimes on juliaset_small for 500 steps, printing a summary
 /// every 100 steps of what events each produces. Used to diagnose display output differences.
 #[test]
 fn juliaset_small_trace() {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/graph_juliaset_small.dots");
+    let mut core_events: Vec<DisplayEventRecord> = Vec::new();
+    let mut graph_events: Vec<DisplayEventRecord> = Vec::new();
 
     // --- Graph: inspect node composition ---
     {
@@ -271,6 +425,26 @@ fn juliaset_small_trace() {
         for dot in &initial_dots {
             println!("{dot:?}");
         }
+
+        if let Some((display_id, _)) = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .find(|(_, node)| matches!(node.t, NodeType::Display(_)))
+        {
+            println!("Display node: #{display_id} {:?}", graph.nodes[display_id]);
+            println!("Display predecessors:");
+            for edge in graph.edges.iter().filter(|edge| edge.to.0 == display_id) {
+                println!(
+                    "  from node#{} {:?} via {:?} ticks={} -> {:?}",
+                    edge.from.0,
+                    graph.nodes[edge.from.0],
+                    edge.from.1,
+                    edge.ticks,
+                    edge.to.1
+                );
+            }
+        }
     }
 
     // --- Core trace ---
@@ -304,8 +478,16 @@ fn juliaset_small_trace() {
                     InterpreterResult::PrintChar(_) | InterpreterResult::PrintLn(_) => {
                         print_chars += 1
                     }
-                    InterpreterResult::Display { command, .. } => {
+                    InterpreterResult::Display {
+                        display_id,
+                        command,
+                    } => {
                         display_events += 1;
+                        core_events.push(DisplayEventRecord {
+                            step: step + 1,
+                            display_id: *display_id,
+                            command: format_display_command(command),
+                        });
                         match command {
                             DisplayCommand::SetWidth(_) => display_by_kind[0] += 1,
                             DisplayCommand::SetHeight(_) => display_by_kind[1] += 1,
@@ -336,6 +518,7 @@ fn juliaset_small_trace() {
         let mut print_chars = 0u64;
         let mut display_events = 0u64;
         let mut display_by_kind = [0u64; 4];
+        let mut first_empty_pending_step: Option<usize> = None;
 
         println!("\n=== Graph executor (500 steps) ===");
         for step in 0..500usize {
@@ -349,8 +532,16 @@ fn juliaset_small_trace() {
                     InterpreterResult::PrintChar(_) | InterpreterResult::PrintLn(_) => {
                         print_chars += 1
                     }
-                    InterpreterResult::Display { command, .. } => {
+                    InterpreterResult::Display {
+                        display_id,
+                        command,
+                    } => {
                         display_events += 1;
+                        graph_events.push(DisplayEventRecord {
+                            step: step + 1,
+                            display_id,
+                            command: format_display_command(&command),
+                        });
                         match command {
                             DisplayCommand::SetWidth(_) => display_by_kind[0] += 1,
                             DisplayCommand::SetHeight(_) => display_by_kind[1] += 1,
@@ -371,6 +562,62 @@ fn juliaset_small_trace() {
                     display_by_kind[3]
                 );
             }
+            if executor.pending_len() == 0 && first_empty_pending_step.is_none() {
+                first_empty_pending_step = Some(step + 1);
+                println!("  graph pending drained at step {}", step + 1);
+                println!("  recent node visits:");
+                for visit in executor.debug_recent_visits().iter().rev().take(20).rev() {
+                    println!(
+                        "    step={} {} dir={:?} value={} addr={}",
+                        visit.step,
+                        executor.debug_node_summary(visit.node_id),
+                        visit.direction,
+                        visit.selected,
+                        visit.addr
+                    );
+                }
+                println!("  recent dead ends:");
+                for dead_end in executor.debug_recent_dead_ends().iter().rev().take(20).rev() {
+                    let (incoming, outgoing) = executor.debug_node_ports(dead_end.from_node);
+                    println!(
+                        "    step={} {} dir={:?} value={} addr={} incoming={incoming:?} outgoing={outgoing:?}",
+                        dead_end.step,
+                        executor.debug_node_summary(dead_end.from_node),
+                        dead_end.direction,
+                        dead_end.selected,
+                        dead_end.addr
+                    );
+                }
+            }
         }
+    }
+
+    println!("\n=== Display event comparison ===");
+    println!("core events: {}", core_events.len());
+    println!("graph events: {}", graph_events.len());
+    for (idx, (core, graph)) in core_events.iter().zip(graph_events.iter()).enumerate() {
+        if core != graph {
+            println!("first differing shared event at index {idx}:");
+            println!("  core : {core:?}");
+            println!("  graph: {graph:?}");
+            break;
+        }
+    }
+    if graph_events.len() < core_events.len() {
+        println!(
+            "graph stopped early at event {} while core continued",
+            graph_events.len()
+        );
+        if let Some(next_core) = core_events.get(graph_events.len()) {
+            println!("  next core event: {next_core:?}");
+        }
+    }
+    println!("last core events:");
+    for event in core_events.iter().rev().take(10).rev() {
+        println!("  {event:?}");
+    }
+    println!("last graph events:");
+    for event in graph_events.iter().rev().take(10).rev() {
+        println!("  {event:?}");
     }
 }

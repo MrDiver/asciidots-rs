@@ -28,6 +28,7 @@ pub struct Tracer {
     visited: FxHashSet<(Position, Direction)>,
     position_nodes: FxHashMap<Position, NodeId>,
     func_entry_map: FxHashMap<u32, NodeId>,
+    func_entry_dirs: FxHashSet<(u32, Direction)>,
     /// Tracks (node_id, exit_port) pairs that have already had an outgoing tracer spawned.
     /// Prevents duplicate edges when a node (e.g. Duplicate) is visited from multiple directions.
     spawned_from: FxHashSet<(NodeId, PortType)>,
@@ -92,6 +93,7 @@ impl Tracer {
             visited: FxHashSet::default(),
             position_nodes: FxHashMap::default(),
             func_entry_map: FxHashMap::default(),
+            func_entry_dirs: FxHashSet::default(),
             spawned_from: FxHashSet::default(),
         }
     }
@@ -435,22 +437,42 @@ impl Tracer {
                 // determine the PrintKind; skip over it so the outgoing dot doesn't
                 // land on it and create a spurious Select node.
                 let modifier_pos = pos + Position::from(dir);
-                if self.field.in_bounds(&modifier_pos)
-                    && matches!(
-                        self.field.at(&modifier_pos),
-                        AsciiCell::ValueMarker | AsciiCell::AddrMarker
-                    )
-                {
-                    let port = exit_port(dir);
-                    if self.spawned_from.insert((node_id, port)) {
-                        queue.push_back(TracingDot {
-                            pos: modifier_pos,
-                            direction: dir,
-                            from_call: false,
-                            edge_from: node_id,
-                            edge_from_port: port,
-                            edge_ticks: 1,
-                        });
+                if self.field.in_bounds(&modifier_pos) {
+                    match self.field.at(&modifier_pos) {
+                        AsciiCell::ValueMarker | AsciiCell::AddrMarker => {
+                            let port = exit_port(dir);
+                            if self.spawned_from.insert((node_id, port)) {
+                                queue.push_back(TracingDot {
+                                    pos: modifier_pos,
+                                    direction: dir,
+                                    from_call: false,
+                                    edge_from: node_id,
+                                    edge_from_port: port,
+                                    edge_ticks: 1,
+                                });
+                            }
+                        }
+                        AsciiCell::Quote | AsciiCell::QuoteStream => {
+                            let string_len = self.collect_quoted(modifier_pos, dir).chars().count();
+                            let mut end_quote = modifier_pos;
+                            for _ in 0..=string_len {
+                                end_quote = end_quote + Position::from(dir);
+                            }
+                            let port = exit_port(dir);
+                            if self.spawned_from.insert((node_id, port)) {
+                                queue.push_back(TracingDot {
+                                    pos: end_quote,
+                                    direction: dir,
+                                    from_call: false,
+                                    edge_from: node_id,
+                                    edge_from_port: port,
+                                    edge_ticks: 0,
+                                });
+                            }
+                        }
+                        _ => {
+                            self.enqueue_tracer(pos, dir, node_id, queue);
+                        }
                     }
                 } else {
                     self.enqueue_tracer(pos, dir, node_id, queue);
@@ -525,7 +547,7 @@ impl Tracer {
                     }
                     ResolvedCall::Ascii(defret_pos, id) => {
                         self.enqueue_tracer(pos, dir, node_id, queue);
-                        if !self.func_entry_map.contains_key(&id) {
+                        if self.func_entry_dirs.insert((id, dir)) {
                             queue.push_back(TracingDot {
                                 pos: defret_pos,
                                 direction: dir,

@@ -5,6 +5,8 @@ use serde::Serialize;
 struct JsonNode {
     id: usize,
     label: String,
+    x: i32,
+    y: i32,
 }
 
 #[derive(Serialize)]
@@ -30,6 +32,8 @@ pub fn graph_to_json(graph: &Graph) -> String {
         .map(|(i, n)| JsonNode {
             id: i,
             label: format!("{:?}", n.t),
+            x: n.position.x,
+            y: n.position.y,
         })
         .collect();
 

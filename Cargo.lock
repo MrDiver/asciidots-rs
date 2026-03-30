@@ -182,6 +182,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "asciidots-graph-tui"
+version = "0.1.0"
+dependencies = [
+ "asciidots-core",
+ "asciidots-display-ratatui",
+ "asciidots-graph",
+ "crossterm",
+ "ratatui",
+ "rustc-hash",
+]
+
+[[package]]
 name = "asciidots-tui"
 version = "0.1.0"
 dependencies = [
