@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::path::{Path, PathBuf};
 
 use asciidots_core::{
     linker,
@@ -13,101 +13,85 @@ use rustc_hash::FxHashSet;
 fn build_graph(program: &str) -> Graph {
     let source = Lexer::new(program).run().expect("lex failed");
     let module = Parser::new(source).run().expect("parse failed");
-    let mut tracer = Tracer::new(module, std::iter::empty(), FxHashSet::default());
+    let mut tracer = Tracer::new(module);
     tracer.trace();
     tracer.into_graph()
 }
 
-fn build_linked_graph(path: &PathBuf) -> Graph {
-    let available = BTreeSet::new();
+fn build_linked_graph(path: &Path) -> Graph {
+    let available = FxHashSet::<String>::default();
     let linked = linker::link_file(path, &available).expect("link_file failed");
-    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
-    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+    let mut tracer = Tracer::new(linked.module);
     tracer.trace();
     tracer.into_graph()
 }
 
-fn count_node_types_all(
-    graph: &Graph,
-) -> (
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-) {
-    let mut create = 0;
-    let mut end = 0;
-    let mut print = 0;
-    let mut set = 0;
-    let mut select = 0;
-    let mut duplicate = 0;
-    let mut operator = 0;
-    let mut conditional = 0;
-    let mut filter = 0;
-    let mut assertion = 0;
-    let mut display = 0;
-    let mut callish = 0;
-
-    for node in &graph.nodes {
-        match &node.t {
-            NodeType::CreateDot(_) => create += 1,
-            NodeType::EndProgram => end += 1,
-            NodeType::Print(_) => print += 1,
-            NodeType::Set(_) => set += 1,
-            NodeType::Select(_) => select += 1,
-            NodeType::Duplicate => duplicate += 1,
-            NodeType::Operator(..) => operator += 1,
-            NodeType::Conditional(_) => conditional += 1,
-            NodeType::Filter(_) => filter += 1,
-            NodeType::Assertion(_) => assertion += 1,
-            NodeType::Display(_) => display += 1,
-            NodeType::Call(_) | NodeType::CallEnter | NodeType::Return => callish += 1,
-        }
-    }
-
-    (
-        create,
-        end,
-        print,
-        set,
-        select,
-        duplicate,
-        operator,
-        conditional,
-        filter,
-        assertion,
-        display,
-        callish,
-    )
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct NodeTypeCounts {
+    create: usize,
+    end: usize,
+    print: usize,
+    set: usize,
+    select: usize,
+    duplicate: usize,
+    operator: usize,
+    conditional: usize,
+    filter: usize,
+    assertion: usize,
+    display: usize,
+    callish: usize,
 }
 
-fn count_node_types(graph: &Graph) -> (usize, usize, usize, usize, usize, usize) {
-    let mut create = 0;
-    let mut end = 0;
-    let mut print = 0;
-    let mut set = 0;
-    let mut select = 0;
-    let mut duplicate = 0;
-    for node in &graph.nodes {
-        match &node.t {
-            NodeType::CreateDot(_) => create += 1,
-            NodeType::EndProgram => end += 1,
-            NodeType::Print(_) => print += 1,
-            NodeType::Set(_) => set += 1,
-            NodeType::Select(_) => select += 1,
-            NodeType::Duplicate => duplicate += 1,
-            _ => {}
+impl NodeTypeCounts {
+    fn for_graph(graph: &Graph) -> Self {
+        let mut counts = Self::default();
+        for node in &graph.nodes {
+            match &node.t {
+                NodeType::CreateDot(_) => counts.create += 1,
+                NodeType::EndProgram => counts.end += 1,
+                NodeType::Print(_) => counts.print += 1,
+                NodeType::Set(_) => counts.set += 1,
+                NodeType::Select(_) => counts.select += 1,
+                NodeType::Duplicate => counts.duplicate += 1,
+                NodeType::Operator(..) => counts.operator += 1,
+                NodeType::Conditional(_) => counts.conditional += 1,
+                NodeType::Filter(_) => counts.filter += 1,
+                NodeType::Assertion(_) => counts.assertion += 1,
+                NodeType::Display(_) => counts.display += 1,
+                NodeType::Call(_) | NodeType::CallEnter | NodeType::Return => counts.callish += 1,
+            }
+        }
+        counts
+    }
+
+    fn routing_only(self) -> RoutingNodeCounts {
+        RoutingNodeCounts {
+            create: self.create,
+            end: self.end,
+            print: self.print,
+            set: self.set,
+            select: self.select,
+            duplicate: self.duplicate,
         }
     }
-    (create, end, print, set, select, duplicate)
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct RoutingNodeCounts {
+    create: usize,
+    end: usize,
+    print: usize,
+    set: usize,
+    select: usize,
+    duplicate: usize,
+}
+
+fn count_node_types_all(graph: &Graph) -> NodeTypeCounts {
+    NodeTypeCounts::for_graph(graph)
+}
+
+fn count_node_types(graph: &Graph) -> RoutingNodeCounts {
+    count_node_types_all(graph).routing_only()
 }
 
 // .-&
@@ -117,9 +101,9 @@ fn simple_path_creates_two_nodes_one_edge() {
     let g = build_graph(".-&");
     assert_eq!(g.nodes.len(), 2, "expected CreateDot + EndProgram");
     assert_eq!(g.edges.len(), 1);
-    let (create, end, ..) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(end, 1);
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.end, 1);
 }
 
 // .-#5-&
@@ -127,10 +111,10 @@ fn simple_path_creates_two_nodes_one_edge() {
 #[test]
 fn set_value_creates_set_node() {
     let g = build_graph(".-#5-&");
-    let (create, end, _, set, ..) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(set, 1);
-    assert_eq!(end, 1);
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.set, 1);
+    assert_eq!(counts.end, 1);
     assert_eq!(g.edges.len(), 2);
 
     let set_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Set(_))).unwrap();
@@ -145,10 +129,10 @@ fn set_value_creates_set_node() {
 #[test]
 fn standalone_dollar_is_passthrough() {
     let g = build_graph(".-$-&");
-    let (create, end, print, ..) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(end, 1);
-    assert_eq!(print, 0, "bare $ should not create a Print node");
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.end, 1);
+    assert_eq!(counts.print, 0, "bare $ should not create a Print node");
     assert_eq!(g.nodes.len(), 2);
 }
 
@@ -157,10 +141,10 @@ fn standalone_dollar_is_passthrough() {
 #[test]
 fn print_value_marker_creates_print_node() {
     let g = build_graph(".-$#-&");
-    let (create, end, print, ..) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(print, 1);
-    assert_eq!(end, 1);
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.print, 1);
+    assert_eq!(counts.end, 1);
     assert_eq!(g.edges.len(), 2);
 
     let print_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Print(_))).unwrap();
@@ -186,11 +170,14 @@ fn print_string_modifier_stores_string() {
 #[test]
 fn value_marker_without_operand_or_selector_is_passthrough() {
     let g = build_graph(".-#---&");
-    let (create, end, _, set, select, _) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(end, 1);
-    assert_eq!(set, 0, "no Set without digits");
-    assert_eq!(select, 0, "no Select when next cell doesn't accept a selector");
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.end, 1);
+    assert_eq!(counts.set, 0, "no Set without digits");
+    assert_eq!(
+        counts.select, 0,
+        "no Select when next cell doesn't accept a selector"
+    );
     assert_eq!(g.nodes.len(), 2);
 }
 
@@ -199,10 +186,10 @@ fn value_marker_without_operand_or_selector_is_passthrough() {
 #[test]
 fn duplicate_node_spawns_multiple_outgoing_edges() {
     let g = build_graph(".-*-&");
-    let (create, end, _, _, _, dup) = count_node_types(&g);
-    assert_eq!(create, 1);
-    assert_eq!(dup, 1);
-    assert_eq!(end, 1);
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 1);
+    assert_eq!(counts.duplicate, 1);
+    assert_eq!(counts.end, 1);
     // CreateDot→Duplicate + Duplicate→EndProgram (Up and Down die out of bounds)
     assert_eq!(g.edges.len(), 2);
 }
@@ -235,9 +222,9 @@ fn set_read_creates_input_set_kind() {
 #[test]
 fn two_independent_paths_produce_separate_nodes() {
     let g = build_graph(".---&\n.---&");
-    let (create, end, ..) = count_node_types(&g);
-    assert_eq!(create, 2);
-    assert_eq!(end, 2);
+    let counts = count_node_types(&g);
+    assert_eq!(counts.create, 2);
+    assert_eq!(counts.end, 2);
     assert_eq!(g.edges.len(), 2);
 }
 
@@ -307,32 +294,28 @@ fn force_direction_sample_stays_routing_only() {
         .join("../samples/force_direction.dots");
     let g = build_linked_graph(&path);
 
-    let (
-        create,
-        end,
-        print,
-        set,
-        select,
-        duplicate,
-        operator,
-        conditional,
-        filter,
-        assertion,
-        display,
-        callish,
-    ) = count_node_types_all(&g);
+    let counts = count_node_types_all(&g);
 
-    assert_eq!(create, 4, "expected one CreateDot per mini-program");
-    assert_eq!(end, 4, "expected one EndProgram per mini-program");
+    assert_eq!(counts.create, 4, "expected one CreateDot per mini-program");
+    assert_eq!(counts.end, 4, "expected one EndProgram per mini-program");
     assert_eq!(g.edges.len(), 4, "expected one edge per mini-program");
-    assert_eq!(print, 0, "force-direction sample should not create Print nodes");
-    assert_eq!(set, 0, "force-direction sample should not create Set nodes");
-    assert_eq!(select, 0, "force-direction sample should not create Select nodes");
-    assert_eq!(duplicate, 0, "force-direction sample should not create Duplicate nodes");
-    assert_eq!(operator, 0, "force-direction sample should not create Operator nodes");
-    assert_eq!(conditional, 0, "force-direction sample should not create Conditional nodes");
-    assert_eq!(filter, 0, "force-direction sample should not create Filter nodes");
-    assert_eq!(assertion, 0, "force-direction sample should not create Assertion nodes");
-    assert_eq!(display, 0, "force-direction sample should not create Display nodes");
-    assert_eq!(callish, 0, "force-direction sample should not create call-related nodes");
+    assert_eq!(counts.print, 0, "force-direction sample should not create Print nodes");
+    assert_eq!(counts.set, 0, "force-direction sample should not create Set nodes");
+    assert_eq!(counts.select, 0, "force-direction sample should not create Select nodes");
+    assert_eq!(counts.duplicate, 0, "force-direction sample should not create Duplicate nodes");
+    assert_eq!(counts.operator, 0, "force-direction sample should not create Operator nodes");
+    assert_eq!(
+        counts.conditional, 0,
+        "force-direction sample should not create Conditional nodes"
+    );
+    assert_eq!(counts.filter, 0, "force-direction sample should not create Filter nodes");
+    assert_eq!(
+        counts.assertion, 0,
+        "force-direction sample should not create Assertion nodes"
+    );
+    assert_eq!(counts.display, 0, "force-direction sample should not create Display nodes");
+    assert_eq!(
+        counts.callish, 0,
+        "force-direction sample should not create call-related nodes"
+    );
 }

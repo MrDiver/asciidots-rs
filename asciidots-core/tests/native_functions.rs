@@ -8,6 +8,7 @@ use asciidots_core::{
     state_machine::DotMachine,
 };
 use common::trace_harness::{assert_interpreter_failure_with_ticks, assert_values_trace};
+use log::trace;
 
 use crate::common::trace_harness::assert_interpreter_success_with_ticks;
 
@@ -181,7 +182,7 @@ fn display_fixture_emits_correct_events() {
         !pixel_values.is_empty(),
         "expected at least one SetPixel command"
     );
-    println!(
+    trace!(
         "display fixture: width={:?}, {} pixels, values={:?}",
         set_width,
         pixel_values.len(),
@@ -215,7 +216,7 @@ fn juliaset_small_emits_display_events() {
                 command,
             } = result
             {
-                println!("[tick={ticks}] id={display_id} {command:?}");
+                trace!("[tick={ticks}] id={display_id} {command:?}");
                 match command {
                     DisplayCommand::SetWidth(w) => set_width = Some(*w),
                     DisplayCommand::SetHeight(h) => set_height = Some(*h),
@@ -239,7 +240,7 @@ fn juliaset_small_emits_display_events() {
         set_pixel_count > 0,
         "expected at least one SetPixel display command, got 0"
     );
-    println!(
+    trace!(
         "Display: {}x{}, {} pixels drawn",
         set_width.unwrap(),
         set_height.unwrap(),

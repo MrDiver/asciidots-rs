@@ -3,11 +3,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use log::trace;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     linker,
-    native::{NativeFunction, nativelib},
+    native::{self, NativeFunction, nativelib},
     parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
@@ -129,12 +129,11 @@ impl DotsInterpreterBuilder {
     }
 
     pub fn build_from_file(self, path: impl AsRef<Path>) -> miette::Result<DotsInterpreter> {
-        let available_native_functions: BTreeSet<String> =
+        let available_native_functions: FxHashSet<String> =
             self.native_registry.keys().cloned().collect();
         let linked = linker::link_file(path.as_ref(), &available_native_functions)?;
         Ok(DotsInterpreter::from_linked(
             linked.module,
-            linked.native_imports,
             self.native_registry,
             self.execution_backend,
         ))
@@ -181,18 +180,17 @@ impl DotsInterpreter {
         Self::from_linked(
             module,
             FxHashMap::default(),
-            FxHashMap::default(),
             ExecutionBackend::SingleThread,
         )
     }
 
     fn from_linked(
         module: DotsModule,
-        native_imports: impl IntoIterator<Item = (String, String)>,
         native_registry: FxHashMap<String, Box<dyn NativeFunction<DotMachine>>>,
         execution_backend: ExecutionBackend,
     ) -> Self {
-        let (mut field, functions) = module.unpack();
+        let (mut field, functions, native_imports) = module.unpack();
+        trace!("Linked module with functions: {:?}", functions);
         let mut function_map: FxHashMap<String, FunctionDefinition> = functions
             .iter()
             .map(|f| {
@@ -200,10 +198,12 @@ impl DotsInterpreter {
                 (name, FunctionDefinition::Ascii(pos))
             })
             .collect();
-
-        for (exposed_name, source_name) in native_imports {
-            function_map.insert(exposed_name, FunctionDefinition::Native(source_name));
-        }
+        
+        function_map.extend(
+            native_imports.into_iter().map(|name| {
+                (name.clone(), FunctionDefinition::Native(name))
+            }),
+        );
 
         let mut function_name_to_id: FxHashMap<Arc<str>, u32> = FxHashMap::default();
         let mut function_defs = Vec::with_capacity(function_map.len());

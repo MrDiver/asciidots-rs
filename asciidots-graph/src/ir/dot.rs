@@ -14,19 +14,21 @@ use crate::ir::{
     selector::{AddrValue, AddrValueSelector, ValueSelector},
 };
 
-#[derive(Clone)]
+#[derive(Debug,Clone)]
 pub struct GraphDot {
     value: AddrValue,
     direction: Direction,
     callstack: Callstack<NodeId>,
+    location: NodeId,
 }
 
 impl GraphDot {
-    pub fn new(direction: Direction) -> Self {
+    pub fn new(node_id: NodeId, direction: Direction) -> Self {
         Self {
             value: AddrValue::default(),
             direction,
             callstack: Callstack::default(),
+            location: node_id,
         }
     }
 
@@ -38,8 +40,12 @@ impl GraphDot {
     pub fn apply_select(&mut self, sel: CoreValueSelector) {
         match sel {
             CoreValueSelector::Value => self.value.select(AddrValueSelector::Value),
-            CoreValueSelector::Addr  => self.value.select(AddrValueSelector::Addr),
+            CoreValueSelector::Addr => self.value.select(AddrValueSelector::Addr),
         }
+    }
+    
+    pub fn set_location(&mut self, node_id: NodeId) {
+        self.location = node_id;
     }
 }
 
@@ -61,7 +67,7 @@ impl EngineDot for GraphDot {
     }
 
     fn current_location(&self) -> NodeId {
-        0 // TODO: track current node
+        self.location
     }
 
     fn callstack_key_from_addr(&self) -> NodeId {
@@ -89,7 +95,7 @@ impl Directed for GraphDot {
 
 impl IsTrue for GraphDot {
     fn is_true(&self) -> bool {
-        self.value.get().abs() >= f64::EPSILON
+        self.value.get().abs() > f64::EPSILON
     }
 }
 

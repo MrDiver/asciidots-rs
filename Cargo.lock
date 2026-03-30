@@ -176,21 +176,10 @@ name = "asciidots-graph"
 version = "0.1.0"
 dependencies = [
  "asciidots-core",
+ "log",
  "rustc-hash",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "asciidots-graph-tui"
-version = "0.1.0"
-dependencies = [
- "asciidots-core",
- "asciidots-display-ratatui",
- "asciidots-graph",
- "crossterm",
- "ratatui",
- "rustc-hash",
 ]
 
 [[package]]

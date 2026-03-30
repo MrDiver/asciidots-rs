@@ -1,5 +1,4 @@
 use asciidots_cli::{WriteType, check_file, graph_file, graph_run_file, inspect_file, run_file};
-use asciidots_graph::compiler::graphsvg::graph_to_svg;
 use asciidots_tui::TuiDisplayMode;
 use clap::{
     Parser, Subcommand, ValueEnum,
@@ -134,4 +133,3 @@ fn main() -> miette::Result<()> {
     }
     Ok(())
 }
-

@@ -7,12 +7,14 @@ use asciidots_core::{
     primitives::{Direction, Orientation, Position},
     state_machine::ValueSelector,
 };
+use log::trace;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ir::graph::{
     CallKind, Edge, Graph, Node, NodeId, NodeType, PortType, PrintKind, SetKind,
 };
 
+#[derive(Debug, Clone)]
 enum FunctionKind {
     Ascii(Position),
     Native(String),
@@ -21,13 +23,13 @@ enum FunctionKind {
 pub struct Tracer {
     field: AsciiField,
     function_defs: Vec<FunctionKind>,
-    function_name_to_id: FxHashMap<Arc<str>, u32>,
+    function_name_to_id: FxHashMap<Arc<str>, u32>, // Maps function name to its index in function_defs
     native_names: FxHashSet<String>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     visited: FxHashSet<(Position, Direction)>,
-    position_nodes: FxHashMap<Position, NodeId>,
-    func_entry_map: FxHashMap<u32, NodeId>,
+    position_to_node: FxHashMap<Position, NodeId>,
+    func_entry_nodes: FxHashMap<u32, NodeId>, // Maps function id to its CallEnter NodeId
     func_entry_dirs: FxHashSet<(u32, Direction)>,
     /// Tracks (node_id, exit_port) pairs that have already had an outgoing tracer spawned.
     /// Prevents duplicate edges when a node (e.g. Duplicate) is visited from multiple directions.
@@ -58,65 +60,87 @@ impl TracingDot {
 
 impl Tracer {
     pub fn new(
-        field: DotsModule,
-        native_imports: impl IntoIterator<Item = (String, String)>,
-        native_names: FxHashSet<String>,
+        module: DotsModule,
     ) -> Self {
-        let (asciifield, funcvec) = field.unpack();
-
-        let mut function_map: FxHashMap<String, FunctionKind> = funcvec
-            .into_iter()
+        let (mut asciifield, functions, native_names) = module.unpack();
+        let mut function_map: FxHashMap<String, FunctionKind> = functions
+            .iter()
             .map(|f| {
-                let (name, pos) = f.unpack();
+                let (name, pos) = f.clone().unpack();
                 (name, FunctionKind::Ascii(pos))
             })
             .collect();
 
-        for (exposed_name, source_name) in native_imports {
-            function_map.insert(exposed_name, FunctionKind::Native(source_name));
+        for name in &native_names {
+            function_map.insert(name.clone(), FunctionKind::Native(name.clone()));
         }
 
         let mut function_name_to_id: FxHashMap<Arc<str>, u32> = FxHashMap::default();
-        let mut function_defs: Vec<FunctionKind> = Vec::with_capacity(function_map.len());
-        for (index, (name, def)) in function_map.into_iter().enumerate() {
-            function_name_to_id.insert(Arc::from(name), index as u32);
-            function_defs.push(def);
+        let mut function_defs = Vec::with_capacity(function_map.len());
+        trace!("[Tracer] Function map: {function_map:#?}");
+        for (index, (name, definition)) in function_map.into_iter().enumerate() {
+            let call_id = index as u32;
+            function_name_to_id.insert(Arc::from(name), call_id);
+            function_defs.push(definition);
         }
+
+        let mut position_to_node= FxHashMap::default();
+        let mut func_entry_nodes = FxHashMap::default();
+        let mut nodes = Vec::default();
+        for (func_id,func) in function_defs.iter().enumerate() {
+            if let FunctionKind::Ascii(pos) = func {
+                if !position_to_node.contains_key(pos){
+                    let id = nodes.len();
+                    position_to_node.insert(*pos, id);
+                    nodes.push(Node::new(*pos, NodeType::CallEnter));
+                    func_entry_nodes.insert(func_id as u32, id);
+                }else{
+                    let id = *position_to_node.get(pos).unwrap();
+                    func_entry_nodes.insert(func_id as u32, id);
+                }
+            }
+        }
+        trace!("[Tracer] Native names: {native_names:#?}");
+        trace!("[Tracer] function_defs: {function_defs:#?}");
+        trace!("[Tracer] function_name_to_id: {function_name_to_id:#?}");
+        Self::resolve_call_sites(&mut asciifield, &function_name_to_id);
 
         Self {
             field: asciifield,
             function_defs,
             function_name_to_id,
-            native_names,
-            nodes: Vec::default(),
+            native_names: native_names.into_iter().collect(),
+            nodes,
             edges: Vec::default(),
             visited: FxHashSet::default(),
-            position_nodes: FxHashMap::default(),
-            func_entry_map: FxHashMap::default(),
+            position_to_node,
+            func_entry_nodes,
             func_entry_dirs: FxHashSet::default(),
             spawned_from: FxHashSet::default(),
         }
     }
 
     pub fn into_graph(self) -> Graph {
+        trace!("[Tracer] Tracing complete. Nodes: {}, Edges: {}", self.nodes.len(), self.edges.len());
+        trace!("Func entry map: {:#?}", self.func_entry_nodes);
         Graph {
             nodes: self.nodes,
             edges: self.edges,
-            func_entry_nodes: self.func_entry_map,
+            func_entry_nodes: self.func_entry_nodes,
         }
     }
 
-    fn resolve_calls(&mut self) {
-        let width = self.field.width();
-        let height = self.field.height();
+    fn resolve_call_sites(field: &mut AsciiField, function_name_to_id: &FxHashMap<Arc<str>, u32>) {
+        let width = field.width();
+        let height = field.height();
         for y in 0..height {
             for x in 0..width {
                 let position: Position = (x, y).into();
-                if let Some(token) = self.field.at_spanned_mut(&position)
+                if let Some(token) = field.at_spanned_mut(&position)
                     && let AsciiCell::Call(name) = token.inner_mut()
-                    && let Some(&call_id) = self.function_name_to_id.get(&**name)
+                    && let Some(call_id) = function_name_to_id.get(name)
                 {
-                    *token.inner_mut() = AsciiCell::CallById(call_id);
+                    *token.inner_mut() = AsciiCell::CallById(*call_id);
                 }
             }
         }
@@ -129,12 +153,12 @@ impl Tracer {
     }
 
     fn get_or_insert_pos(&mut self, pos: Position, node_type: NodeType) -> NodeId {
-        if let Some(&id) = self.position_nodes.get(&pos) {
+        if let Some(&id) = self.position_to_node.get(&pos) {
             return id;
         }
         let id = self.nodes.len();
         self.nodes.push(Node::new(pos, node_type));
-        self.position_nodes.insert(pos, id);
+        self.position_to_node.insert(pos, id);
         id
     }
 
@@ -167,12 +191,11 @@ impl Tracer {
     }
 
     pub fn trace(&mut self) {
-        self.resolve_calls();
         let mut queue: VecDeque<TracingDot> = VecDeque::new();
 
         for td in self.initial_dots() {
             let id = self.push_node(Node::new(td.pos, NodeType::CreateDot(td.direction)));
-            self.position_nodes.insert(td.pos, id);
+            self.position_to_node.insert(td.pos, id);
             queue.push_back(TracingDot {
                 pos: td.pos,
                 direction: td.direction,
@@ -186,6 +209,7 @@ impl Tracer {
         while let Some(td) = queue.pop_front() {
             self.step(td, &mut queue);
         }
+        self.prune_duplicate_edges();
     }
 
     fn step(&mut self, td: TracingDot, queue: &mut VecDeque<TracingDot>) {
@@ -308,7 +332,7 @@ impl Tracer {
             // --- Direction-slot nodes ---
             AsciiCell::Write => {
                 let kind = self.collect_print_kind(pos, dir)?;
-                if let Some(&id) = self.position_nodes.get(&pos) {
+                if let Some(&id) = self.position_to_node.get(&pos) {
                     if let NodeType::Print(ref mut slots) = self.nodes[id].t {
                         slots[dir_index(dir)].get_or_insert(kind);
                     }
@@ -318,7 +342,7 @@ impl Tracer {
                     slots[dir_index(dir)] = Some(kind);
                     let id = self.nodes.len();
                     self.nodes.push(Node::new(pos, NodeType::Print(slots)));
-                    self.position_nodes.insert(pos, id);
+                    self.position_to_node.insert(pos, id);
                     Some(id)
                 }
             }
@@ -327,7 +351,7 @@ impl Tracer {
                 let kind = self.collect_set_kind(pos, dir, cell);
                 if let Some(kind) = kind {
                     // has digits/input after — Set node
-                    if let Some(&id) = self.position_nodes.get(&pos) {
+                    if let Some(&id) = self.position_to_node.get(&pos) {
                         if let NodeType::Set(ref mut slots) = self.nodes[id].t {
                             slots[dir_index(dir)].get_or_insert(kind);
                         }
@@ -337,7 +361,7 @@ impl Tracer {
                         slots[dir_index(dir)] = Some(kind);
                         let id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::Set(slots)));
-                        self.position_nodes.insert(pos, id);
+                        self.position_to_node.insert(pos, id);
                         Some(id)
                     }
                 } else {
@@ -374,50 +398,44 @@ impl Tracer {
 
             AsciiCell::Call(name) => {
                 // Unresolved call — resolve_calls() couldn't match the name to a known function.
-                let call_kind = if self.native_names.contains(name.as_ref()) {
-                    CallKind::NativeCall(name.to_string())
-                } else {
-                    let id = self
-                        .function_name_to_id
-                        .get(&**name)
-                        .copied()
-                        .unwrap_or(u32::MAX);
-                    CallKind::AsciiCall(id)
-                };
-                Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
+                unreachable!("Unresolved call to {:?} at {:?} — should have been resolved to CallById or caused a compile error", name, pos);
             }
-            AsciiCell::CallById(id) => {
-                let call_kind = match self.function_defs.get(*id as usize) {
+            AsciiCell::CallById(func_id) => {
+                trace!("Resolving call to func_id {} at {:?} with from_call={} in dir {:?} ", func_id, pos, from_call, dir);
+                let call_kind = match self.function_defs.get(*func_id as usize) {
                     Some(FunctionKind::Native(name)) => CallKind::NativeCall(name.clone()),
-                    Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(*id),
+                    Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(*func_id),
                 };
+                trace!("Resolved call kind: {:?}, func_entry_dirs: {:#?}", call_kind, self.func_entry_dirs);
                 Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
 
             AsciiCell::DefRet(name) => {
                 if from_call {
+                    trace!("Resolving call to {:?} at {:?} with from_call=true", name, pos);
                     let func_id = self
                         .function_name_to_id
                         .get(name.as_str())
                         .copied()
-                        .unwrap_or(u32::MAX);
-                    if let Some(&id) = self.func_entry_map.get(&func_id) {
-                        Some(id)
+                        .expect("DefRet name not found in function_name_to_id — should have been resolved by resolve_calls");
+                    if let Some(&node_id) = self.func_entry_nodes.get(&func_id) {
+                        Some(node_id)
                     } else {
-                        let id = self.nodes.len();
+                        unreachable!("TESTING");
+                        let node_id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::CallEnter));
                         // Intentionally NOT inserted into position_nodes:
                         // the same DefRet position visited with from_call=false
                         // must create a distinct Return node via get_or_insert_pos.
-                        self.func_entry_map.insert(func_id, id);
-                        Some(id)
+                        self.func_entry_nodes.insert(func_id, node_id);
+                        Some(node_id)
                     }
                 } else {
                     Some(self.get_or_insert_pos(pos, NodeType::Return))
                 }
             }
 
-            _ => None,
+            _ => panic!("Cell type {:?} should have been handled by step() passthrough logic, not get_or_create_node", cell),
         }
     }
 
@@ -546,7 +564,15 @@ impl Tracer {
                         }
                     }
                     ResolvedCall::Ascii(defret_pos, id) => {
-                        self.enqueue_tracer(pos, dir, node_id, queue);
+                        //self.enqueue_tracer(pos, dir, node_id, queue);
+                        for out_dir in [
+                            Direction::Up,
+                            Direction::Down,
+                            Direction::Left,
+                            Direction::Right,
+                        ] {
+                            self.enqueue_tracer(pos, out_dir, node_id, queue);
+                        }
                         if self.func_entry_dirs.insert((id, dir)) {
                             queue.push_back(TracingDot {
                                 pos: defret_pos,
@@ -566,12 +592,17 @@ impl Tracer {
             // Display: Down→SetPixel reverses to Up and continues; all other directions are sinks.
             AsciiCell::Display(_) => {
                 if dir == Direction::Down {
-                    self.enqueue_tracer(pos, Direction::Up, node_id, queue);
+                    //self.enqueue_tracer(pos, Direction::Up, node_id, queue);
                 }
             }
 
             _ => {}
         }
+    }
+
+    fn prune_duplicate_edges(&mut self) {
+        let mut unique_edges = FxHashSet::default();
+        self.edges.retain(|edge| unique_edges.insert((edge.from, edge.to)));
     }
 
     fn enqueue_tracer(

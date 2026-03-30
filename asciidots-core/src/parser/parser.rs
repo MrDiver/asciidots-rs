@@ -1,5 +1,5 @@
 use nom::AsChar;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::{
@@ -15,15 +15,16 @@ use crate::{
 pub struct DotsModule {
     field: AsciiField,
     functions: Vec<AsciiFunc>,
+    native_names: Vec<String>,
 }
 
 impl DotsModule {
-    pub fn new(field: AsciiField, functions: Vec<AsciiFunc>) -> Self {
-        Self { field, functions }
+    pub fn new(field: AsciiField, functions: Vec<AsciiFunc>, native_names: Vec<String>) -> Self {
+        Self { field, functions, native_names }
     }
 
-    pub fn unpack(self) -> (AsciiField, Vec<AsciiFunc>) {
-        (self.field, self.functions)
+    pub fn unpack(self) -> (AsciiField, Vec<AsciiFunc>, Vec<String>) {
+        (self.field, self.functions, self.native_names)
     }
 }
 
@@ -39,6 +40,12 @@ impl Parser {
     pub fn run(self) -> miette::Result<DotsModule> {
         let grid = self.module.grid();
         let preamble = self.module.preamble();
+        let aliases: FxHashMap<String, String> = preamble.iter().filter_map(|statement|{
+            match statement {
+                PreambleStatement::Import { name, alias: Some(alias),.. } => Some((alias.clone(), name.clone())),
+                _ => None,
+            }
+        }).collect();
         let warps: FxHashSet<char> = preamble
             .iter()
             .filter_map(|statement| match statement {
@@ -178,19 +185,25 @@ impl Parser {
                         }
                     }
                     '%' => {
-                        let name = get_name(x, y);
-                        if name.is_none() {
-                            diagnostics.push(ParsingError::MissingNameForCallOperator {
-                                _span: token.span(),
-                            });
-                        }
-                        let name = name.expect("Should have a name");
-                        if name == "display" {
-                            let id = display_counter;
-                            display_counter += 1;
-                            AsciiCell::Display(id)
-                        } else {
-                            AsciiCell::Call(Arc::from(name))
+                        match get_name(x, y) {
+                            Some(name) if name == "display" => {
+                                let id = display_counter;
+                                display_counter += 1;
+                                AsciiCell::Display(id)
+                            }
+                            Some(name) => {
+                                if let Some(original) = aliases.get(&name) {
+                                    AsciiCell::Call(Arc::from(original.clone()))
+                                } else {
+                                    AsciiCell::Call(Arc::from(name.clone()))
+                                }
+                            },
+                            None => {
+                                diagnostics.push(ParsingError::MissingNameForCallOperator {
+                                    _span: token.span(),
+                                });
+                                AsciiCell::Empty
+                            }
                         }
                     }
                     '$' => AsciiCell::Write,
@@ -268,6 +281,7 @@ impl Parser {
             Ok(DotsModule {
                 field,
                 functions: functiondefs,
+                native_names: Vec::new(),
             })
         } else {
             Err(ParsingErrorCollection::new(diagnostics).into())

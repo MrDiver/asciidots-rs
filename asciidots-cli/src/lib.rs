@@ -1,23 +1,21 @@
-use std::collections::BTreeSet;
 use std::io::{self, Write};
 
 use asciidots_core::{
     display::DisplayBackend,
     interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
     linker,
-    native::nativelib::default_native_library_for,
+    native::{NativeFunction, nativelib::default_native_library_for},
     parser::LexError,
 };
 use asciidots_display_minifb::MinifbDisplayBackend;
-use asciidots_graph::compiler::graphjson::graph_to_json;
-use asciidots_graph::compiler::graphsvg::graph_to_svg;
+use asciidots_graph::ir::graphjson::graph_to_json;
+use asciidots_graph::ir::graphsvg::graph_to_svg;
+use asciidots_graph::ir::graphviz::to_graphviz;
 use asciidots_graph::{
-    compiler::{graphviz::to_graphviz, tracer::Tracer},
-    ir::dot::GraphDot,
-    runtime::executor::GraphExecutor,
+    compiler::tracer::Tracer, ir::dot::GraphDot, runtime::executor::GraphExecutor,
 };
 use miette::{Diagnostic, IntoDiagnostic};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxHashMap};
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -34,10 +32,13 @@ pub enum WriteType {
 }
 
 pub fn graph_file(path: &str, t: WriteType) -> miette::Result<String> {
-    let available: BTreeSet<String> = BTreeSet::new();
+    let native_registry:FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> = default_native_library_for::<GraphDot>()
+        .into_iter()
+        .map(|f| (f.name().to_string(), f))
+        .collect();
+    let available = native_registry.keys().cloned().collect();
     let linked = linker::link_file(path.as_ref(), &available)?;
-    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
-    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+    let mut tracer = Tracer::new(linked.module);
     tracer.trace();
     let graph = tracer.into_graph();
     let res = match t {
@@ -49,17 +50,16 @@ pub fn graph_file(path: &str, t: WriteType) -> miette::Result<String> {
 }
 
 pub fn graph_run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
-    let available: BTreeSet<String> = BTreeSet::new();
-    let linked = linker::link_file(path.as_ref(), &available)?;
-    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
-    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
-    tracer.trace();
-    let graph = tracer.into_graph();
-
-    let native_registry = default_native_library_for::<GraphDot>()
+    let native_registry:FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> = default_native_library_for::<GraphDot>()
         .into_iter()
         .map(|f| (f.name().to_string(), f))
         .collect();
+    let available = native_registry.keys().cloned().collect();
+    let linked = linker::link_file(path.as_ref(), &available)?;
+    let mut tracer = Tracer::new(linked.module);
+    tracer.trace();
+    let graph = tracer.into_graph();
+
     let mut executor = GraphExecutor::new(graph, native_registry);
     let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
 

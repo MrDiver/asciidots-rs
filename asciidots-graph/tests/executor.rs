@@ -24,10 +24,9 @@ struct DisplayEventRecord {
 // ---------------------------------------------------------------------------
 
 fn build_executor(path: &PathBuf) -> GraphExecutor {
-    let available: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let available = FxHashSet::<String>::default();
     let linked = linker::link_file(path, &available).expect("link_file failed");
-    let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
-    let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+    let mut tracer = Tracer::new(linked.module);
     tracer.trace();
     let graph = tracer.into_graph();
     let native_registry = default_native_library_for::<GraphDot>()
@@ -57,6 +56,64 @@ struct DisplayEventCounts {
     heights: usize,
     color_modes: usize,
     pixels: usize,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct NodeTypeCounts {
+    create_dot: usize,
+    end_program: usize,
+    print: usize,
+    set: usize,
+    select: usize,
+    duplicate: usize,
+    operator: usize,
+    conditional: usize,
+    filter: usize,
+    assertion: usize,
+    display: usize,
+    call: usize,
+    call_enter: usize,
+    r#return: usize,
+}
+
+impl NodeTypeCounts {
+    fn add(&mut self, node_type: &NodeType) {
+        match node_type {
+            NodeType::CreateDot(_) => self.create_dot += 1,
+            NodeType::EndProgram => self.end_program += 1,
+            NodeType::Print(_) => self.print += 1,
+            NodeType::Set(_) => self.set += 1,
+            NodeType::Select(_) => self.select += 1,
+            NodeType::Duplicate => self.duplicate += 1,
+            NodeType::Operator(..) => self.operator += 1,
+            NodeType::Conditional(_) => self.conditional += 1,
+            NodeType::Filter(_) => self.filter += 1,
+            NodeType::Assertion(_) => self.assertion += 1,
+            NodeType::Display(_) => self.display += 1,
+            NodeType::Call(_) => self.call += 1,
+            NodeType::CallEnter => self.call_enter += 1,
+            NodeType::Return => self.r#return += 1,
+        }
+    }
+
+    fn labeled_counts(self) -> [(&'static str, usize); 14] {
+        [
+            ("Assertion", self.assertion),
+            ("Call", self.call),
+            ("CallEnter", self.call_enter),
+            ("Conditional", self.conditional),
+            ("CreateDot", self.create_dot),
+            ("Display", self.display),
+            ("Duplicate", self.duplicate),
+            ("EndProgram", self.end_program),
+            ("Filter", self.filter),
+            ("Operator", self.operator),
+            ("Print", self.print),
+            ("Return", self.r#return),
+            ("Select", self.select),
+            ("Set", self.set),
+        ]
+    }
 }
 
 fn color_mode_discriminant(m: &ColorMode) -> u8 {
@@ -382,43 +439,29 @@ fn juliaset_small_trace() {
 
     // --- Graph: inspect node composition ---
     {
-        let available: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let available = FxHashSet::<String>::default();
         let linked = linker::link_file(&path, &available).expect("link failed");
-        let native_names: FxHashSet<String> = linked.native_imports.keys().cloned().collect();
-        let mut tracer = Tracer::new(linked.module, linked.native_imports, native_names);
+        let mut tracer = Tracer::new(linked.module);
         tracer.trace();
         let graph = tracer.into_graph();
         let mut initial_dots = Vec::new();
 
-        let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+        let mut counts = NodeTypeCounts::default();
         for node in &graph.nodes {
-            let label = match &node.t {
+            match &node.t {
                 NodeType::CreateDot(_) => {
                     initial_dots.push(node);
-                    "CreateDot"
                 }
-                NodeType::EndProgram => "EndProgram",
-                NodeType::Print(_) => "Print",
-                NodeType::Set(_) => "Set",
-                NodeType::Select(_) => "Select",
-                NodeType::Duplicate => "Duplicate",
-                NodeType::Operator(..) => "Operator",
-                NodeType::Conditional(_) => "Conditional",
-                NodeType::Filter(_) => "Filter",
-                NodeType::Assertion(_) => "Assertion",
-                NodeType::Display(_) => "Display",
-                NodeType::Call(_) => "Call",
-                NodeType::CallEnter => "CallEnter",
-                NodeType::Return => "Return",
-            };
-            *counts.entry(label).or_default() += 1;
+                _ => {}
+            }
+            counts.add(&node.t);
         }
         println!(
             "=== Graph node counts ({} total, {} edges) ===",
             graph.nodes.len(),
             graph.edges.len()
         );
-        for (label, count) in &counts {
+        for (label, count) in counts.labeled_counts() {
             println!("  {label}: {count}");
         }
         println!("Initial Dots:");
@@ -498,7 +541,7 @@ fn juliaset_small_trace() {
                     _ => {}
                 }
             }
-            if (step + 1) % 10 == 0 {
+            if (step + 1) % 100 == 0 {
                 println!(
                     "  step {:>3}: dots={num_dots} print_chars={print_chars} display={display_events} (width={} height={} colormode={} pixel={})",
                     step + 1,
@@ -552,7 +595,7 @@ fn juliaset_small_trace() {
                     _ => {}
                 }
             }
-            if (step + 1) % 10 == 0 {
+            if (step + 1) % 100 == 0 {
                 println!(
                     "  step {:>3}: pending={pending_before:>6} print_chars={print_chars} display={display_events} (width={} height={} colormode={} pixel={})",
                     step + 1,

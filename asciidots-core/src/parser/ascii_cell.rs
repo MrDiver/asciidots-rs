@@ -6,7 +6,6 @@ use crate::primitives::{Direction, Orientation, Position};
 #[derive(Clone, Debug)]
 pub struct AsciiFunc {
     name: String,
-    original_name: Option<String>,
     position: (usize, usize),
 }
 
@@ -14,19 +13,6 @@ impl AsciiFunc {
     pub fn new(name: String, position: (usize, usize)) -> Self {
         Self {
             name,
-            original_name: None,
-            position,
-        }
-    }
-
-    pub fn with_original_name(
-        name: String,
-        original_name: Option<String>,
-        position: (usize, usize),
-    ) -> Self {
-        Self {
-            name,
-            original_name,
             position,
         }
     }
@@ -35,24 +21,12 @@ impl AsciiFunc {
         &self.name
     }
 
-    pub fn original_name(&self) -> Option<&str> {
-        self.original_name.as_deref()
-    }
-
-    pub fn is_aliased(&self) -> bool {
-        self.original_name.is_some()
-    }
-
     pub fn position(&self) -> &(usize, usize) {
         &self.position
     }
 
     pub fn unpack(self) -> (String, Position) {
         (self.name, self.position.into())
-    }
-
-    pub fn unpack_with_original(self) -> (String, Option<String>, Position) {
-        (self.name, self.original_name, self.position.into())
     }
 }
 
