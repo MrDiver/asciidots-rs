@@ -103,6 +103,8 @@ impl GraphExecutor {
         for (i, edge) in graph.edges.iter().enumerate() {
             outgoing[edge.from.0].push(i);
         }
+        
+
 
         let mut operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>> = FxHashMap::default();
         let mut conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>> =
@@ -477,10 +479,10 @@ impl GraphExecutor {
                     command,
                 });
                 // Down→SetPixel: reverse to Up and continue. All other directions: dot is consumed.
-               /*  if dir == Direction::Down {
+                if dir == Direction::Down {
                     dot.set_direction(Direction::Up);
                     self.forward_dot(dot, node_id);
-                } */
+                }
             }
 
             NodeType::CallEnter => {

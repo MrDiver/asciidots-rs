@@ -29,6 +29,7 @@ pub struct Tracer {
     edges: Vec<Edge>,
     visited: FxHashSet<(Position, Direction)>,
     position_to_node: FxHashMap<Position, NodeId>,
+    call_entry_nodes_by_pos: FxHashMap<Position, NodeId>,
     func_entry_nodes: FxHashMap<u32, NodeId>, // Maps function id to its CallEnter NodeId
     func_entry_dirs: FxHashSet<(u32, Direction)>,
     /// Tracks (node_id, exit_port) pairs that have already had an outgoing tracer spawned.
@@ -84,18 +85,19 @@ impl Tracer {
             function_defs.push(definition);
         }
 
-        let mut position_to_node= FxHashMap::default();
+        let position_to_node = FxHashMap::default();
+        let mut call_entry_nodes_by_pos = FxHashMap::default();
         let mut func_entry_nodes = FxHashMap::default();
         let mut nodes = Vec::default();
         for (func_id,func) in function_defs.iter().enumerate() {
             if let FunctionKind::Ascii(pos) = func {
-                if !position_to_node.contains_key(pos){
+                if !call_entry_nodes_by_pos.contains_key(pos){
                     let id = nodes.len();
-                    position_to_node.insert(*pos, id);
                     nodes.push(Node::new(*pos, NodeType::CallEnter));
+                    call_entry_nodes_by_pos.insert(*pos, id);
                     func_entry_nodes.insert(func_id as u32, id);
                 }else{
-                    let id = *position_to_node.get(pos).unwrap();
+                    let id = *call_entry_nodes_by_pos.get(pos).unwrap();
                     func_entry_nodes.insert(func_id as u32, id);
                 }
             }
@@ -114,6 +116,7 @@ impl Tracer {
             edges: Vec::default(),
             visited: FxHashSet::default(),
             position_to_node,
+            call_entry_nodes_by_pos,
             func_entry_nodes,
             func_entry_dirs: FxHashSet::default(),
             spawned_from: FxHashSet::default(),
@@ -421,12 +424,9 @@ impl Tracer {
                     if let Some(&node_id) = self.func_entry_nodes.get(&func_id) {
                         Some(node_id)
                     } else {
-                        unreachable!("TESTING");
                         let node_id = self.nodes.len();
                         self.nodes.push(Node::new(pos, NodeType::CallEnter));
-                        // Intentionally NOT inserted into position_nodes:
-                        // the same DefRet position visited with from_call=false
-                        // must create a distinct Return node via get_or_insert_pos.
+                        self.call_entry_nodes_by_pos.insert(pos, node_id);
                         self.func_entry_nodes.insert(func_id, node_id);
                         Some(node_id)
                     }
@@ -505,8 +505,16 @@ impl Tracer {
 
             AsciiCell::DefRet(_) => {
                 if from_call {
-                    // CallEnter: pass-through
-                    self.enqueue_tracer(pos, dir, node_id, queue);
+                    // CallEnter: pass through in all four directions (like Duplicate)
+                    // to ensure dots arriving from any direction can continue
+                    for out_dir in [
+                        Direction::Up,
+                        Direction::Down,
+                        Direction::Left,
+                        Direction::Right,
+                    ] {
+                        self.enqueue_tracer(pos, out_dir, node_id, queue);
+                    }
                 }
                 // Return: terminal, VM handles via callstack
             }
@@ -592,7 +600,7 @@ impl Tracer {
             // Display: Down→SetPixel reverses to Up and continues; all other directions are sinks.
             AsciiCell::Display(_) => {
                 if dir == Direction::Down {
-                    //self.enqueue_tracer(pos, Direction::Up, node_id, queue);
+                    self.enqueue_tracer(pos, Direction::Up, node_id, queue);
                 }
             }
 

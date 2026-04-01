@@ -7,7 +7,7 @@ use asciidots_core::{
 };
 use asciidots_graph::{
     compiler::tracer::Tracer,
-    ir::{dot::GraphDot, graph::NodeType},
+    ir::{dot::GraphDot, graph::{Graph, NodeType}},
     runtime::executor::GraphExecutor,
 };
 use rustc_hash::FxHashSet;
@@ -34,6 +34,14 @@ fn build_executor(path: &PathBuf) -> GraphExecutor {
         .map(|f| (f.name().to_string(), f))
         .collect();
     GraphExecutor::new(graph, native_registry)
+}
+
+fn build_graph(path: &PathBuf) -> Graph {
+    let available = FxHashSet::<String>::default();
+    let linked = linker::link_file(path, &available).expect("link_file failed");
+    let mut tracer = Tracer::new(linked.module);
+    tracer.trace();
+    tracer.into_graph()
 }
 
 /// The final display state after applying all commands in order.
@@ -372,6 +380,19 @@ fn duplicate_one_dir_sample_graph_matches_core_output() {
     );
 }
 
+#[test]
+fn juliaset_small_print_output_matches_core_first_500_steps() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/graph_juliaset_small.dots");
+    let core_output = collect_core_output(&path, 500);
+    let graph_output = collect_graph_output(&path, 500);
+
+    assert_eq!(
+        core_output, graph_output,
+        "print output mismatch in first 500 steps\ncore={core_output:?}\ngraph={graph_output:?}"
+    );
+}
+
 /// Runs both runtimes on juliaset_small.dots for 1000 steps and asserts the accumulated
 /// display state matches (juliaset runs indefinitely so we snapshot at a fixed step count).
 #[test]
@@ -663,4 +684,51 @@ fn juliaset_small_trace() {
     for event in graph_events.iter().rev().take(10).rev() {
         println!("  {event:?}");
     }
+}
+
+#[test]
+fn testmem_tracing_keeps_callenter_and_return_separate_and_finishes_quickly() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/testmem.dots");
+
+    let graph = build_graph(&path);
+
+    let call_enter = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| matches!(node.t, NodeType::CallEnter))
+        .expect("expected a CallEnter node for imported mem function");
+    let return_node = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| matches!(node.t, NodeType::Return))
+        .expect("expected a Return node for imported mem function");
+
+    assert_ne!(call_enter.0, return_node.0, "CallEnter and Return must be distinct nodes");
+    assert_eq!(
+        graph.nodes[call_enter.0].position,
+        graph.nodes[return_node.0].position,
+        "CallEnter and Return should share the same function entry position"
+    );
+
+    let mut core = DotsInterpreterBuilder::new()
+        .build_from_file(&path)
+        .expect("core interpreter failed to initialize");
+    let mut executor = build_executor(&path);
+
+    for _ in 0..100 {
+        if core.is_finished() && executor.is_finished() {
+            break;
+        }
+        if !core.is_finished() {
+            core.step().expect("core interpreter step failed");
+        }
+        if !executor.is_finished() {
+            executor.step();
+        }
+    }
+
+    assert!(core.is_finished(), "core interpreter should finish within 100 steps");
+    assert!(executor.is_finished(), "graph executor should finish within 100 steps");
 }
