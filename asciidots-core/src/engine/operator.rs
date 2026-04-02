@@ -41,6 +41,7 @@ impl<T: Pairable> OperatorQueue<T> {
         self.horizontal.iter().chain(self.vertical.iter())
     }
 
+    #[inline]
     pub fn push_horizontal_match_vertical(&mut self, value: T) -> Option<OperatorPair<T>> {
         if let Some(matched) = self.vertical.find_match(&value) {
             Some(OperatorPair {
@@ -53,6 +54,7 @@ impl<T: Pairable> OperatorQueue<T> {
         }
     }
 
+    #[inline]
     pub fn push_vertical_match_horizontal(&mut self, value: T) -> Option<OperatorPair<T>> {
         if let Some(matched) = self.horizontal.find_match(&value) {
             Some(OperatorPair {
@@ -120,11 +122,34 @@ where
     pub _marker: std::marker::PhantomData<V>,
 }
 
+#[inline]
+fn operator_closure<V: DotValue>(op_char: char) -> fn(V, V) -> V {
+    match op_char {
+        '+' => V::add,
+        '-' => V::sub,
+        '*' => V::mul,
+        '/' => V::div,
+        '%' => V::rem,
+        '^' => V::pow,
+        '=' => |a, b| V::bool_val(a == b),
+        '!' => |a, b| V::bool_val(a != b),
+        '>' => |a, b| V::bool_val(a > b),
+        '<' => |a, b| V::bool_val(a < b),
+        'G' => |a, b| V::bool_val(a >= b),
+        'L' => |a, b| V::bool_val(a <= b),
+        '&' => V::bitand,
+        '|' => V::bitor,
+        'x' => V::bitxor,
+        _ => |a, _| a,
+    }
+}
+
 impl<T, V> Operator<T, V>
 where
     T: Oriented + Pairable + Operand<V>,
     V: DotValue,
 {
+    #[inline]
     pub fn enter(&mut self, operand: T) -> Option<T> {
         let OperatorPair {
             horizontal,
@@ -133,24 +158,7 @@ where
             Orientation::Horizontal => self.queue.push_horizontal_match_vertical(operand),
             Orientation::Vertical => self.queue.push_vertical_match_horizontal(operand),
         }?;
-        let op_closure: fn(V, V) -> V = match self.c {
-            '+' => V::add,
-            '-' => V::sub,
-            '*' => V::mul,
-            '/' => V::div,
-            '%' => V::rem,
-            '^' => V::pow,
-            '=' => |a, b| V::bool_val(a == b),
-            '!' => |a, b| V::bool_val(a != b),
-            '>' => |a, b| V::bool_val(a > b),
-            '<' => |a, b| V::bool_val(a < b),
-            'G' => |a, b| V::bool_val(a >= b),
-            'L' => |a, b| V::bool_val(a <= b),
-            '&' => V::bitand,
-            '|' => V::bitor,
-            'x' => V::bitxor,
-            _ => |a, _| a,
-        };
+        let op_closure = operator_closure::<V>(self.c);
         Some(match self.kind {
             Orientation::Horizontal => horizontal.apply_operator(vertical, op_closure),
             Orientation::Vertical => vertical.apply_operator(horizontal, op_closure),
@@ -164,6 +172,7 @@ pub struct ConditionalOperator<T: EngineDot> {
 }
 
 impl<T: EngineDot> ConditionalOperator<T> {
+    #[inline]
     pub fn enter(&mut self, dot: T) -> Option<T> {
         let OperatorPair {
             mut horizontal,

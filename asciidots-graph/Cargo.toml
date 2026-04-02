@@ -9,3 +9,11 @@ log = "0.4.29"
 rustc-hash = "*"
 serde = { version = "1.0.228", features = ["serde_derive"] }
 serde_json = "1.0.149"
+smallvec = "1.13"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "executor_bench"
+harness = false

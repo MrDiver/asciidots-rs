@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use smallvec::SmallVec;
 
 use rustc_hash::FxHashMap;
 
@@ -8,7 +8,7 @@ pub trait Pairable {
 
 #[derive(Debug)]
 pub struct PairingQueue<T> {
-    values: FxHashMap<u64, VecDeque<T>>,
+    values: FxHashMap<u64, SmallVec<[T; 4]>>,
 }
 
 impl<T> Default for PairingQueue<T> {
@@ -21,11 +21,11 @@ impl<T> Default for PairingQueue<T> {
 
 impl<T: Pairable> PairingQueue<T> {
     pub fn push(&mut self, value: T) {
-        self.values.entry(value.key()).or_default().push_back(value)
+        self.values.entry(value.key()).or_default().push(value);
     }
 
     pub fn find_match(&mut self, value: &T) -> Option<T> {
-        self.values.get_mut(&value.key())?.pop_front()
+        self.values.get_mut(&value.key())?.pop()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {

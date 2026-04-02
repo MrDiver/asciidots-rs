@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 
 use log::trace;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use asciidots_core::{
     engine::{
@@ -104,8 +105,6 @@ impl GraphExecutor {
             outgoing[edge.from.0].push(i);
         }
         
-
-
         let mut operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>> = FxHashMap::default();
         let mut conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>> =
             FxHashMap::default();
@@ -137,15 +136,15 @@ impl GraphExecutor {
 
         let mut executor = Self {
             outgoing,
-            pending: Vec::new(),
-            deferred_prints: Vec::new(),
+            pending: Vec::with_capacity(2048),
+            deferred_prints: Vec::with_capacity(64),
             operator_queues,
             conditional_queues,
             native_registry,
-            native_returned: Vec::new(),
+            native_returned: Vec::with_capacity(256),
             waiting_for_input: FxHashMap::default(),
             input_counter: 0,
-            results: Vec::new(),
+            results: Vec::with_capacity(64),
             finished: false,
             empty_steps: 0,
             step_counter: 0,
@@ -202,6 +201,7 @@ impl GraphExecutor {
         self.step_counter += 1;
         self.results.clear();
 
+        // Process deferred prints
         let mut i = 0;
         while i < self.deferred_prints.len() {
             if self.deferred_prints[i].ticks_left == 0 {
@@ -393,8 +393,7 @@ impl GraphExecutor {
                 // Send a clone of the dot on every outgoing edge except the one
                 // the dot came from (entry port = the port opposite its direction).
                 let _entry = entry_port(dot.direction());
-                let edge_indices: Vec<usize> = self.outgoing[node_id].clone();
-                for edge_idx in edge_indices {
+                for &edge_idx in &self.outgoing[node_id] {
                     let edge = &self.graph.edges[edge_idx];
                     let leaving_dir = dir_from_exit_port(&edge.from.1);
                     if leaving_dir == dot.direction().reverse() {
@@ -492,8 +491,7 @@ impl GraphExecutor {
             NodeType::Return => {
                 // Pop callstack to get the Call node, then follow its continuation edges.
                 if let Some(call_node_id) = dot.pop_callstack() {
-                    let edge_indices: Vec<usize> = self.outgoing[call_node_id].clone();
-                    for edge_idx in edge_indices {
+                    for &edge_idx in &self.outgoing[call_node_id] {
                         let edge = &self.graph.edges[edge_idx];
                         // Check if dot can exit via this edge's from-port (opposite its direction).
                         let leaving_dir = dir_from_exit_port(&edge.from.1);
@@ -551,12 +549,14 @@ impl GraphExecutor {
     }
 
     /// Send `dot` along the outgoing edge that exits `from_node` in `dot.direction()`.
+    #[inline]
     fn forward_dot(&mut self, dot: GraphDot, from_node: NodeId) {
         let dir = dot.direction();
         self.send_in_direction(dot, from_node, dir);
     }
 
     /// Send `dot` along the outgoing edge that exits `from_node` via `exit_port(dir)`.
+    #[inline]
     fn send_in_direction(&mut self, dot: GraphDot, from_node: NodeId, dir: Direction) {
         let port = exit_port(dir);
         for &edge_idx in &self.outgoing[from_node] {
@@ -629,6 +629,7 @@ fn dir_index(dir: Direction) -> usize {
     }
 }
 
+#[inline]
 fn exit_port(dir: Direction) -> PortType {
     match dir {
         Direction::Up => PortType::NORTH,
@@ -638,6 +639,7 @@ fn exit_port(dir: Direction) -> PortType {
     }
 }
 
+#[inline]
 fn entry_port(dir: Direction) -> PortType {
     match dir {
         Direction::Up => PortType::SOUTH,
@@ -648,6 +650,7 @@ fn entry_port(dir: Direction) -> PortType {
 }
 
 /// Direction a dot is traveling when it arrives through `port`.
+#[inline]
 fn dir_from_entry_port(port: &PortType) -> Direction {
     match port {
         PortType::SOUTH => Direction::Up,
@@ -658,6 +661,7 @@ fn dir_from_entry_port(port: &PortType) -> Direction {
 }
 
 /// Direction a dot is traveling when it leaves through `port`.
+#[inline]
 fn dir_from_exit_port(port: &PortType) -> Direction {
     match port {
         PortType::SOUTH => Direction::Down,
