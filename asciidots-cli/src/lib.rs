@@ -58,9 +58,10 @@ pub fn graph_run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
     let linked = linker::link_file(path.as_ref(), &available)?;
     let mut tracer = Tracer::new(linked.module);
     tracer.trace();
+    let max_pending = tracer.get_max_pending();
     let graph = tracer.into_graph();
 
-    let mut executor = GraphExecutor::new(graph, native_registry);
+    let mut executor = GraphExecutor::new(graph, native_registry, Some(max_pending));
     let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
 
     'outer: while !executor.is_finished() {

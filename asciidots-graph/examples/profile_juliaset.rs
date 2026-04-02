@@ -13,20 +13,26 @@ fn build_executor(path: &PathBuf) -> GraphExecutor {
     let linked = linker::link_file(path, &available).expect("link_file failed");
     let mut tracer = Tracer::new(linked.module);
     tracer.trace();
+    let max_pending = tracer.get_max_pending();
     let graph = tracer.into_graph();
     let native_registry = default_native_library_for::<GraphDot>()
         .into_iter()
         .map(|f| (f.name().to_string(), f))
         .collect();
-    GraphExecutor::new(graph, native_registry)
+    GraphExecutor::new(graph, native_registry, Some(max_pending))
 }
 
 fn main() {
     let juliaset_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../asciidots-core/tests/fixtures/juliaset/juliaset.dots");
 
-    println!("Profiling full juliaset.dots execution...");
+    println!("Building executor (parse + link + trace)...");
+    let build_start = Instant::now();
     let mut executor = build_executor(&juliaset_path);
+    let build_elapsed = build_start.elapsed();
+    println!("  Build time: {:.3}s", build_elapsed.as_secs_f64());
+
+    println!("Executing runtime steps...");
     let start = Instant::now();
     let mut step_count = 0;
 
@@ -44,4 +50,9 @@ fn main() {
         step_count as f64 / elapsed.as_secs_f64(),
         elapsed.as_micros() as f64 / step_count as f64
     );
+    println!("  Max pending dots: {}", executor.max_pending_size());
+    println!("\n=== SUMMARY ===");
+    println!("  Build (setup): {:.3}s", build_elapsed.as_secs_f64());
+    println!("  Execution: {:.3}s", elapsed.as_secs_f64());
+    println!("  Total: {:.3}s", (build_elapsed + elapsed).as_secs_f64());
 }

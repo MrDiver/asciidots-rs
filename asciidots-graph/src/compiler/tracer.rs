@@ -35,6 +35,7 @@ pub struct Tracer {
     /// Tracks (node_id, exit_port) pairs that have already had an outgoing tracer spawned.
     /// Prevents duplicate edges when a node (e.g. Duplicate) is visited from multiple directions.
     spawned_from: FxHashSet<(NodeId, PortType)>,
+    max_pending: usize, // For initialization of buffers in executor
 }
 
 pub struct TracingDot {
@@ -120,6 +121,7 @@ impl Tracer {
             func_entry_nodes,
             func_entry_dirs: FxHashSet::default(),
             spawned_from: FxHashSet::default(),
+            max_pending: 0,
         }
     }
 
@@ -131,6 +133,10 @@ impl Tracer {
             edges: self.edges,
             func_entry_nodes: self.func_entry_nodes,
         }
+    }
+    
+    pub fn get_max_pending(&self) -> usize {
+        self.max_pending
     }
 
     fn resolve_call_sites(field: &mut AsciiField, function_name_to_id: &FxHashMap<Arc<str>, u32>) {
@@ -210,6 +216,7 @@ impl Tracer {
         }
 
         while let Some(td) = queue.pop_front() {
+            self.max_pending = self.max_pending.max(queue.len());
             self.step(td, &mut queue);
         }
         self.prune_duplicate_edges();

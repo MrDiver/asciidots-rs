@@ -13,12 +13,13 @@ fn build_executor(path: &PathBuf) -> GraphExecutor {
     let linked = linker::link_file(path, &available).expect("link_file failed");
     let mut tracer = Tracer::new(linked.module);
     tracer.trace();
+    let max_pending = tracer.get_max_pending();
     let graph = tracer.into_graph();
     let native_registry = default_native_library_for::<GraphDot>()
         .into_iter()
         .map(|f| (f.name().to_string(), f))
         .collect();
-    GraphExecutor::new(graph, native_registry)
+    GraphExecutor::new(graph, native_registry, Some(max_pending))
 }
 
 fn main() {

@@ -77,6 +77,7 @@ pub struct GraphExecutor {
     outgoing: Vec<Vec<usize>>,
     pending: Vec<PendingDot>,
     deferred_prints: Vec<DeferredPrint>,
+    arrived: Vec<PendingDot>,  // Reused buffer for dots that arrived this step
     operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>>,
     conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
@@ -91,12 +92,15 @@ pub struct GraphExecutor {
     step_counter: u64,
     recent_visits: VecDeque<NodeVisitRecord>,
     recent_dead_ends: VecDeque<DeadEndRecord>,
+    /// Track peak memory for tuning allocations
+    max_pending_size: usize,
 }
 
 impl GraphExecutor {
     pub fn new(
         graph: Graph,
         native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
+        capacity_hint: Option<usize>,
     ) -> Self {
         let n = graph.nodes.len();
 
@@ -136,8 +140,9 @@ impl GraphExecutor {
 
         let mut executor = Self {
             outgoing,
-            pending: Vec::with_capacity(2048),
+            pending: Vec::with_capacity(capacity_hint.unwrap_or(2048)),
             deferred_prints: Vec::with_capacity(64),
+            arrived: Vec::with_capacity(256),
             operator_queues,
             conditional_queues,
             native_registry,
@@ -151,6 +156,7 @@ impl GraphExecutor {
             recent_visits: VecDeque::with_capacity(DEBUG_BUFFER_LIMIT),
             recent_dead_ends: VecDeque::with_capacity(DEBUG_BUFFER_LIMIT),
             graph,
+            max_pending_size: 0,
         };
 
         // Seed initial dots from CreateDot nodes.
@@ -170,6 +176,10 @@ impl GraphExecutor {
 
     pub fn pending_len(&self) -> usize {
         self.pending.len()
+    }
+
+    pub fn max_pending_size(&self) -> usize {
+        self.max_pending_size
     }
 
     pub fn graph(&self) -> &Graph {
@@ -219,17 +229,19 @@ impl GraphExecutor {
 
         // Fire dots that have arrived (ticks_left == 0), decrement the rest.
         let mut i = 0;
-        let mut arrived: Vec<PendingDot> = Vec::new();
         while i < self.pending.len() {
             if self.pending[i].ticks_left == 0 {
-                arrived.push(self.pending.swap_remove(i));
+                self.arrived.push(self.pending.swap_remove(i));
             } else {
                 self.pending[i].ticks_left -= 1;
                 i += 1;
             }
         }
 
-        if arrived.is_empty()
+        // Track peak memory for tuning pre-allocation
+        self.max_pending_size = self.max_pending_size.max(self.pending.len());
+
+        if self.arrived.is_empty()
             && self.native_returned.is_empty()
             && self.waiting_for_input.is_empty()
         {
@@ -241,7 +253,7 @@ impl GraphExecutor {
             self.empty_steps = 0;
         }
 
-        for pd in arrived {
+        while let Some(pd) = self.arrived.pop() {
             self.process_dot(pd.dot, pd.dest_node);
         }
 
@@ -311,6 +323,7 @@ impl GraphExecutor {
         }
     }
 
+    #[inline]
     fn process_dot(&mut self, mut dot: GraphDot, node_id: NodeId) {
         self.push_visit(NodeVisitRecord {
             step: self.step_counter,
@@ -586,6 +599,7 @@ impl GraphExecutor {
         });
     }
 
+    #[inline]
     fn push_visit(&mut self, visit: NodeVisitRecord) {
         if self.recent_visits.len() == DEBUG_BUFFER_LIMIT {
             self.recent_visits.pop_front();
@@ -593,6 +607,7 @@ impl GraphExecutor {
         self.recent_visits.push_back(visit);
     }
 
+    #[inline]
     fn push_dead_end(&mut self, dead_end: DeadEndRecord) {
         if self.recent_dead_ends.len() == DEBUG_BUFFER_LIMIT {
             self.recent_dead_ends.pop_front();
