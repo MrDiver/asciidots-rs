@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use smallvec::SmallVec;
 
 pub trait Callstackable<T: Clone + Hash> {
     fn callstack(&self) -> &Callstack<T>;
@@ -15,7 +16,7 @@ pub struct CallFrame<T> {
 
 #[derive(Debug, Default, Clone)]
 pub struct Callstack<T> {
-    frames: Vec<CallFrame<T>>,
+    frames: SmallVec<[CallFrame<T>; 4]>,
 }
 
 impl<T: Clone + Hash> Callstack<T> {
