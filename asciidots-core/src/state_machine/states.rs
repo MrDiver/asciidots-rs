@@ -364,7 +364,8 @@ impl MachineStateExecutor for SetState {
                 ValueSelector::Value => dot.set_value(self.input.unwrap_or_else(|| unreachable!())),
                 ValueSelector::Addr => dot.set_addr(self.input.unwrap_or_else(|| unreachable!())),
             };
-            dot.set_value(self.input.unwrap_or_else(|| unreachable!()));
+            // TODO: Make test for this bug
+            // dot.set_value(self.input.unwrap_or_else(|| unreachable!()));
             dot.step();
             return StateTransition::Transition;
         } else if self.waiting_input {
@@ -372,7 +373,9 @@ impl MachineStateExecutor for SetState {
         }
 
         match token.inner() {
-            AsciiCell::Read | AsciiCell::Digit(_) | AsciiCell::Quote | AsciiCell::QuoteStream => StateTransition::Stay,
+            AsciiCell::Read | AsciiCell::Digit(_) | AsciiCell::Quote | AsciiCell::QuoteStream => {
+                StateTransition::Stay
+            }
             _ => {
                 match (self.acc, self.kind) {
                     (Some(acc), ValueSelector::Value) => {

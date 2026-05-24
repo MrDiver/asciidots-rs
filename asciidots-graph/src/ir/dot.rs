@@ -14,7 +14,7 @@ use crate::ir::{
     selector::{AddrValue, AddrValueSelector, ValueSelector},
 };
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct GraphDot {
     value: AddrValue,
     direction: Direction,
@@ -43,7 +43,7 @@ impl GraphDot {
             CoreValueSelector::Addr => self.value.select(AddrValueSelector::Addr),
         }
     }
-    
+
     pub fn set_location(&mut self, node_id: NodeId) {
         self.location = node_id;
     }

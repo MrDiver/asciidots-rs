@@ -11,10 +11,7 @@ pub struct AsciiFunc {
 
 impl AsciiFunc {
     pub fn new(name: String, position: (usize, usize)) -> Self {
-        Self {
-            name,
-            position,
-        }
+        Self { name, position }
     }
 
     pub fn name(&self) -> &str {

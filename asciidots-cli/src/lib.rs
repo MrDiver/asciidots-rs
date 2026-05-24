@@ -15,7 +15,7 @@ use asciidots_graph::{
     compiler::tracer::Tracer, ir::dot::GraphDot, runtime::executor::GraphExecutor,
 };
 use miette::{Diagnostic, IntoDiagnostic};
-use rustc_hash::{FxHashMap};
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 #[derive(Error, Diagnostic, Debug)]
@@ -32,10 +32,11 @@ pub enum WriteType {
 }
 
 pub fn graph_file(path: &str, t: WriteType) -> miette::Result<String> {
-    let native_registry:FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> = default_native_library_for::<GraphDot>()
-        .into_iter()
-        .map(|f| (f.name().to_string(), f))
-        .collect();
+    let native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> =
+        default_native_library_for::<GraphDot>()
+            .into_iter()
+            .map(|f| (f.name().to_string(), f))
+            .collect();
     let available = native_registry.keys().cloned().collect();
     let linked = linker::link_file(path.as_ref(), &available)?;
     let mut tracer = Tracer::new(linked.module);
@@ -50,10 +51,11 @@ pub fn graph_file(path: &str, t: WriteType) -> miette::Result<String> {
 }
 
 pub fn graph_run_file(path: &str, use_minifb: bool) -> miette::Result<()> {
-    let native_registry:FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> = default_native_library_for::<GraphDot>()
-        .into_iter()
-        .map(|f| (f.name().to_string(), f))
-        .collect();
+    let native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>> =
+        default_native_library_for::<GraphDot>()
+            .into_iter()
+            .map(|f| (f.name().to_string(), f))
+            .collect();
     let available = native_registry.keys().cloned().collect();
     let linked = linker::link_file(path.as_ref(), &available)?;
     let mut tracer = Tracer::new(linked.module);

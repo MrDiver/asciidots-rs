@@ -77,7 +77,7 @@ pub struct GraphExecutor {
     outgoing: Vec<Vec<usize>>,
     pending: Vec<PendingDot>,
     deferred_prints: Vec<DeferredPrint>,
-    arrived: Vec<PendingDot>,  // Reused buffer for dots that arrived this step
+    arrived: Vec<PendingDot>, // Reused buffer for dots that arrived this step
     operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>>,
     conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>>,
     native_registry: FxHashMap<String, Box<dyn NativeFunction<GraphDot>>>,
@@ -108,7 +108,7 @@ impl GraphExecutor {
         for (i, edge) in graph.edges.iter().enumerate() {
             outgoing[edge.from.0].push(i);
         }
-        
+
         let mut operator_queues: FxHashMap<NodeId, Operator<GraphDot, f64>> = FxHashMap::default();
         let mut conditional_queues: FxHashMap<NodeId, ConditionalOperator<GraphDot>> =
             FxHashMap::default();
@@ -432,7 +432,7 @@ impl GraphExecutor {
                     if let Some(result) = queue.enter(dot) {
                         self.forward_dot(result, node_id);
                     }
-                }else{
+                } else {
                     unreachable!("Operator queue not found for node {node_id}");
                 }
             }
@@ -443,7 +443,7 @@ impl GraphExecutor {
                         let dir = result.direction();
                         self.send_in_direction(result, node_id, dir);
                     }
-                }else{
+                } else {
                     unreachable!("Conditional queue not found for node {node_id}");
                 }
             }
@@ -525,7 +525,7 @@ impl GraphExecutor {
                         });
                         break;
                     }
-                }else{
+                } else {
                     unreachable!("Return dot with empty callstack at node {node_id}");
                 }
             }
@@ -539,12 +539,17 @@ impl GraphExecutor {
                     }
                 }
                 CallKind::AsciiCall(func_id) => {
-                    trace!("Call node {node_id} pushing to callstack and jumping to function {func_id} with direction {:?}", dot.direction());
+                    trace!(
+                        "Call node {node_id} pushing to callstack and jumping to function {func_id} with direction {:?}",
+                        dot.direction()
+                    );
                     let func_id = *func_id;
                     dot.push_callstack(node_id);
                     if let Some(&entry_node) = self.graph.func_entry_nodes.get(&func_id) {
-                        trace!("Found entry node {entry_node} for function {func_id}, pushing pending dot with direction {:?}",
-                            dot.direction());
+                        trace!(
+                            "Found entry node {entry_node} for function {func_id}, pushing pending dot with direction {:?}",
+                            dot.direction()
+                        );
                         trace!("Entry node details: {:#?}", self.graph.nodes[entry_node]);
                         self.pending.push(PendingDot {
                             dot,
@@ -553,7 +558,7 @@ impl GraphExecutor {
                             total_ticks: 0,
                             ticks_left: 0,
                         });
-                    }else{
+                    } else {
                         unreachable!("Function entry node not found for function {func_id}");
                     }
                 }

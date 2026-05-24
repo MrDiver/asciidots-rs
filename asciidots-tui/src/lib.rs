@@ -15,11 +15,9 @@ use asciidots_core::presentation::{
 use asciidots_display_minifb::MinifbDisplayBackend;
 use asciidots_display_ratatui::{DisplayBuffer, DisplayWidget, RatatuiDisplayBackend};
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
-    EnableMouseCapture, DisableMouseCapture,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseEventKind,
 };
-use rustc_hash::FxHashMap;
-use std::io::stdout;
 use miette::NamedSource;
 use ratatui::widgets::Paragraph;
 use ratatui::{
@@ -31,6 +29,8 @@ use ratatui::{
         ScrollbarState, Table, Widget,
     },
 };
+use rustc_hash::FxHashMap;
+use std::io::stdout;
 
 // ╔══════════════════════════════════════╗
 // ║                                      ║
@@ -562,7 +562,6 @@ impl Default for RatatuiView {
     }
 }
 
-
 impl Drop for RatatuiView {
     fn drop(&mut self) {
         crossterm::execute!(stdout(), DisableMouseCapture).ok();
@@ -652,7 +651,10 @@ impl DotsView for RatatuiView {
                             let count = ratatui_buffers.len() as u32;
                             let display_cols = Layout::default()
                                 .direction(Direction::Horizontal)
-                                .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
+                                .constraints(vec![
+                                    Constraint::Ratio(1, count);
+                                    ratatui_buffers.len()
+                                ])
                                 .split(content_area);
                             for ((id, buffer), panel_area) in
                                 ratatui_buffers.iter().zip(display_cols.iter())
@@ -695,7 +697,10 @@ impl DotsView for RatatuiView {
                         } else {
                             Layout::default()
                                 .direction(Direction::Vertical)
-                                .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+                                .constraints([
+                                    Constraint::Percentage(60),
+                                    Constraint::Percentage(40),
+                                ])
                                 .split(cols[0])
                                 .to_vec()
                         };
@@ -721,7 +726,10 @@ impl DotsView for RatatuiView {
                             let count = ratatui_buffers.len() as u32;
                             let display_cols = Layout::default()
                                 .direction(Direction::Horizontal)
-                                .constraints(vec![Constraint::Ratio(1, count); ratatui_buffers.len()])
+                                .constraints(vec![
+                                    Constraint::Ratio(1, count);
+                                    ratatui_buffers.len()
+                                ])
                                 .split(display_area);
                             for ((id, buffer), panel_area) in
                                 ratatui_buffers.iter().zip(display_cols.iter())
@@ -762,7 +770,9 @@ impl DotsView for RatatuiView {
                             .map(|row| {
                                 let cells = (0..settings_model.column_count())
                                     .map(|column| {
-                                        if let Some(table_cell) = settings_model.get_cell(row, column) {
+                                        if let Some(table_cell) =
+                                            settings_model.get_cell(row, column)
+                                        {
                                             let style = style_for_table_cell(&table_cell);
                                             Cell::from(table_cell.text).style(style)
                                         } else {
@@ -942,8 +952,8 @@ fn interpreter_thread(
 
     // Route Display events to local backends; forward everything else to the UI.
     let route = |results: Vec<InterpreterResult>,
-                     display_backends: &mut FxHashMap<u32, Box<dyn DisplayBackend>>,
-                     display_reg_tx: &mpsc::Sender<DisplayReg>|
+                 display_backends: &mut FxHashMap<u32, Box<dyn DisplayBackend>>,
+                 display_reg_tx: &mpsc::Sender<DisplayReg>|
      -> Vec<InterpreterResult> {
         let mut non_display: Vec<InterpreterResult> = Vec::new();
         let mut display_batches: FxHashMap<u32, Vec<asciidots_core::interpreter::DisplayCommand>> =
@@ -951,7 +961,10 @@ fn interpreter_thread(
 
         for result in results {
             match result {
-                InterpreterResult::Display { display_id, command } => {
+                InterpreterResult::Display {
+                    display_id,
+                    command,
+                } => {
                     display_backends.entry(display_id).or_insert_with(|| {
                         let backend: Box<dyn DisplayBackend> = match display_mode {
                             TuiDisplayMode::Minifb => Box::new(MinifbDisplayBackend::new()),
@@ -984,7 +997,10 @@ fn interpreter_thread(
         let mut stop = false;
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
-                AppCommand::StopProgram => { stop = true; break; }
+                AppCommand::StopProgram => {
+                    stop = true;
+                    break;
+                }
                 AppCommand::Reset => {
                     display_backends.clear();
                     display_reg_tx.send(DisplayReg::Reset).ok();
@@ -1009,7 +1025,10 @@ fn interpreter_thread(
 
         // Run steps for at most 8 ms, then release the lock so the UI thread
         // can always get a read lock within that window.
-        let results = shared.write().unwrap().tick_budgeted(Duration::from_millis(8));
+        let results = shared
+            .write()
+            .unwrap()
+            .tick_budgeted(Duration::from_millis(8));
 
         if results.is_empty() {
             // Not running or tick_speed hasn't elapsed yet — avoid busy-spin.
@@ -1070,7 +1089,13 @@ fn run_with_controller(
 
     let interp_shared = Arc::clone(&shared);
     let _interp = thread::spawn(move || {
-        interpreter_thread(interp_shared, cmd_rx, result_tx, display_mode, display_reg_tx);
+        interpreter_thread(
+            interp_shared,
+            cmd_rx,
+            result_tx,
+            display_mode,
+            display_reg_tx,
+        );
     });
 
     let mut view = RatatuiView::new();
@@ -1082,8 +1107,12 @@ fn run_with_controller(
         // Register any new display buffers the interpreter thread created.
         while let Ok(reg) = display_reg_rx.try_recv() {
             match reg {
-                DisplayReg::New(id, buffer) => { view.ratatui_buffers.insert(id, buffer); }
-                DisplayReg::Reset => { view.ratatui_buffers.clear(); }
+                DisplayReg::New(id, buffer) => {
+                    view.ratatui_buffers.insert(id, buffer);
+                }
+                DisplayReg::Reset => {
+                    view.ratatui_buffers.clear();
+                }
             }
         }
 

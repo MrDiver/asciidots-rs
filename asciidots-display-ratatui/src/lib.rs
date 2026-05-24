@@ -4,12 +4,7 @@ use asciidots_core::{
     display::DisplayBackend,
     interpreter::{ColorMode, DisplayCommand},
 };
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::Color,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Color, widgets::Widget};
 
 #[derive(Debug, Clone)]
 pub struct DisplayBuffer {
@@ -61,12 +56,16 @@ impl Default for RatatuiDisplayBackend {
 
 impl DisplayBackend for RatatuiDisplayBackend {
     fn handle(&mut self, command: DisplayCommand) {
-        let Ok(mut buf) = self.buffer.write() else { return; };
+        let Ok(mut buf) = self.buffer.write() else {
+            return;
+        };
         Self::apply_to_buf(&mut buf, command);
     }
 
     fn handle_batch(&mut self, commands: &[DisplayCommand]) {
-        let Ok(mut buf) = self.buffer.write() else { return; };
+        let Ok(mut buf) = self.buffer.write() else {
+            return;
+        };
         for command in commands {
             Self::apply_to_buf(&mut buf, command.clone());
         }
@@ -97,7 +96,11 @@ impl RatatuiDisplayBackend {
 }
 
 fn normalized_phase(value: f64) -> f64 {
-    if !value.is_finite() { 0.0 } else { value.abs().fract() }
+    if !value.is_finite() {
+        0.0
+    } else {
+        value.abs().fract()
+    }
 }
 
 fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
@@ -105,12 +108,19 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
     let m = l - c / 2.0;
-    let (r1, g1, b1) = if h < 60.0 { (c, x, 0.0) }
-        else if h < 120.0 { (x, c, 0.0) }
-        else if h < 180.0 { (0.0, c, x) }
-        else if h < 240.0 { (0.0, x, c) }
-        else if h < 300.0 { (x, 0.0, c) }
-        else { (c, 0.0, x) };
+    let (r1, g1, b1) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
     let to_u8 = |v: f64| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
     (to_u8(r1), to_u8(g1), to_u8(b1))
 }
@@ -120,12 +130,19 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     let c = v * s;
     let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
     let m = v - c;
-    let (r1, g1, b1) = if h < 60.0 { (c, x, 0.0) }
-        else if h < 120.0 { (x, c, 0.0) }
-        else if h < 180.0 { (0.0, c, x) }
-        else if h < 240.0 { (0.0, x, c) }
-        else if h < 300.0 { (x, 0.0, c) }
-        else { (c, 0.0, x) };
+    let (r1, g1, b1) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
     let to_u8 = |v: f64| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
     (to_u8(r1), to_u8(g1), to_u8(b1))
 }
@@ -152,7 +169,11 @@ fn value_to_rgb(mode: ColorMode, value: f64) -> u32 {
             hsv_to_rgb(hue, 1.0, 1.0)
         }
         ColorMode::BlackAndWhite => {
-            let v = if normalized_phase(value) >= 0.5 { 255u8 } else { 0u8 };
+            let v = if normalized_phase(value) >= 0.5 {
+                255u8
+            } else {
+                0u8
+            };
             (v, v, v)
         }
     };
@@ -180,7 +201,9 @@ fn u32_to_ratatui_color(packed: u32) -> Color {
 
 impl Widget for DisplayWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let Ok(display) = self.buffer.read() else { return; };
+        let Ok(display) = self.buffer.read() else {
+            return;
+        };
         if display.width == 0 || display.height == 0 {
             return;
         }

@@ -92,15 +92,11 @@ impl TableModel for SettingsTableModel {
                     TableCellKind::Default,
                 ),
                 (3, 0) => TableCell::new("Steps/Tick", TableCellKind::Changeable),
-                (3, 1) => TableCell::new(
-                    format!("{}", self.steps_per_tick),
-                    TableCellKind::Default,
-                ),
+                (3, 1) => {
+                    TableCell::new(format!("{}", self.steps_per_tick), TableCellKind::Default)
+                }
                 (4, 0) => TableCell::new("Ticks", TableCellKind::Changeable),
-                (4, 1) => TableCell::new(
-                    format!("{}", self.tick_count),
-                    TableCellKind::Changing,
-                ),
+                (4, 1) => TableCell::new(format!("{}", self.tick_count), TableCellKind::Changing),
                 (5, 0) => TableCell::new("Last Step", TableCellKind::Changeable),
                 (5, 1) => TableCell::new(
                     format!("{:?}", self.last_step_duration),

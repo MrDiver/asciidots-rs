@@ -233,4 +233,3 @@ pub fn assert_interpreter_failure_with_ticks(
         summary.ticks
     );
 }
-

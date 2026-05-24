@@ -117,7 +117,11 @@ fn set_value_creates_set_node() {
     assert_eq!(counts.end, 1);
     assert_eq!(g.edges.len(), 2);
 
-    let set_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Set(_))).unwrap();
+    let set_node = g
+        .nodes
+        .iter()
+        .find(|n| matches!(n.t, NodeType::Set(_)))
+        .unwrap();
     if let NodeType::Set(slots) = &set_node.t {
         // dot travels Right → dir_index(Right) = 3
         assert!(matches!(slots[3], Some(SetKind::Value(v)) if v == 5.0));
@@ -147,7 +151,11 @@ fn print_value_marker_creates_print_node() {
     assert_eq!(counts.end, 1);
     assert_eq!(g.edges.len(), 2);
 
-    let print_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Print(_))).unwrap();
+    let print_node = g
+        .nodes
+        .iter()
+        .find(|n| matches!(n.t, NodeType::Print(_)))
+        .unwrap();
     if let NodeType::Print(slots) = &print_node.t {
         assert!(matches!(slots[3], Some(PrintKind::Value)));
     }
@@ -158,7 +166,11 @@ fn print_value_marker_creates_print_node() {
 #[test]
 fn print_string_modifier_stores_string() {
     let g = build_graph(".-$\"hi\"-&");
-    let print_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Print(_))).unwrap();
+    let print_node = g
+        .nodes
+        .iter()
+        .find(|n| matches!(n.t, NodeType::Print(_)))
+        .unwrap();
     if let NodeType::Print(slots) = &print_node.t {
         assert!(matches!(&slots[3], Some(PrintKind::Normal(s)) if s == "hi"));
     }
@@ -199,7 +211,11 @@ fn duplicate_node_spawns_multiple_outgoing_edges() {
 #[test]
 fn print_addr_marker_creates_print_node() {
     let g = build_graph(".-$@-&");
-    let print_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Print(_))).unwrap();
+    let print_node = g
+        .nodes
+        .iter()
+        .find(|n| matches!(n.t, NodeType::Print(_)))
+        .unwrap();
     if let NodeType::Print(slots) = &print_node.t {
         assert!(matches!(slots[3], Some(PrintKind::Addr)));
     }
@@ -210,7 +226,11 @@ fn print_addr_marker_creates_print_node() {
 #[test]
 fn set_read_creates_input_set_kind() {
     let g = build_graph(".-#?-&");
-    let set_node = g.nodes.iter().find(|n| matches!(n.t, NodeType::Set(_))).unwrap();
+    let set_node = g
+        .nodes
+        .iter()
+        .find(|n| matches!(n.t, NodeType::Set(_)))
+        .unwrap();
     if let NodeType::Set(slots) = &set_node.t {
         assert!(matches!(slots[3], Some(SetKind::Input)));
     }
@@ -290,8 +310,7 @@ fn conditional_node_traces_north_redirect_path() {
 
 #[test]
 fn force_direction_sample_stays_routing_only() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../samples/force_direction.dots");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/force_direction.dots");
     let g = build_linked_graph(&path);
 
     let counts = count_node_types_all(&g);
@@ -299,21 +318,42 @@ fn force_direction_sample_stays_routing_only() {
     assert_eq!(counts.create, 4, "expected one CreateDot per mini-program");
     assert_eq!(counts.end, 4, "expected one EndProgram per mini-program");
     assert_eq!(g.edges.len(), 4, "expected one edge per mini-program");
-    assert_eq!(counts.print, 0, "force-direction sample should not create Print nodes");
-    assert_eq!(counts.set, 0, "force-direction sample should not create Set nodes");
-    assert_eq!(counts.select, 0, "force-direction sample should not create Select nodes");
-    assert_eq!(counts.duplicate, 0, "force-direction sample should not create Duplicate nodes");
-    assert_eq!(counts.operator, 0, "force-direction sample should not create Operator nodes");
+    assert_eq!(
+        counts.print, 0,
+        "force-direction sample should not create Print nodes"
+    );
+    assert_eq!(
+        counts.set, 0,
+        "force-direction sample should not create Set nodes"
+    );
+    assert_eq!(
+        counts.select, 0,
+        "force-direction sample should not create Select nodes"
+    );
+    assert_eq!(
+        counts.duplicate, 0,
+        "force-direction sample should not create Duplicate nodes"
+    );
+    assert_eq!(
+        counts.operator, 0,
+        "force-direction sample should not create Operator nodes"
+    );
     assert_eq!(
         counts.conditional, 0,
         "force-direction sample should not create Conditional nodes"
     );
-    assert_eq!(counts.filter, 0, "force-direction sample should not create Filter nodes");
+    assert_eq!(
+        counts.filter, 0,
+        "force-direction sample should not create Filter nodes"
+    );
     assert_eq!(
         counts.assertion, 0,
         "force-direction sample should not create Assertion nodes"
     );
-    assert_eq!(counts.display, 0, "force-direction sample should not create Display nodes");
+    assert_eq!(
+        counts.display, 0,
+        "force-direction sample should not create Display nodes"
+    );
     assert_eq!(
         counts.callish, 0,
         "force-direction sample should not create call-related nodes"

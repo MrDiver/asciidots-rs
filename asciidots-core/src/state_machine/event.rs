@@ -8,7 +8,10 @@ pub enum MachineEvent {
     Died,
     EndProgram,
     HitOperator,
-    AssertionFailed { expected: f64, found: f64 },
+    AssertionFailed {
+        expected: f64,
+        found: f64,
+    },
     PrintLn(String),
     PrintChar(char),
     Input(u64),

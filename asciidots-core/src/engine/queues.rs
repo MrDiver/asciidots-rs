@@ -25,7 +25,11 @@ impl<T: Pairable> PairingQueue<T> {
     }
 
     pub fn find_match(&mut self, value: &T) -> Option<T> {
-        self.values.get_mut(&value.key())?.pop()
+        let bucket = self.values.get_mut(&value.key())?;
+        if bucket.is_empty() {
+            return None;
+        }
+        Some(bucket.remove(0))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {

@@ -3,9 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{
-    interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult},
-};
+use crate::interpreter::{DotsInterpreter, InterpreterCommand, InterpreterResult};
 
 use super::models::{AsciiMapModel, DotDebugTableModel, SettingsTableModel};
 
@@ -97,7 +95,10 @@ impl RuntimeController {
             self.last_step_duration = start.elapsed();
             self.tick_count += 1;
             let needs_input = results.iter().any(|r| {
-                matches!(r, InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram)
+                matches!(
+                    r,
+                    InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram
+                )
             });
             all_results.extend(results);
             if needs_input {
@@ -161,7 +162,10 @@ impl RuntimeController {
             self.tick_count += 1;
             steps_run += 1;
             let needs_input = results.iter().any(|r| {
-                matches!(r, InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram)
+                matches!(
+                    r,
+                    InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram
+                )
             });
             all_results.extend(results);
             if needs_input {
@@ -233,7 +237,10 @@ impl RuntimeController {
     pub fn dot_debug_table_model(&self) -> DotDebugTableModel<'_> {
         DotDebugTableModel::from_dots(
             self.interpreter.get_dots(),
-            self.interpreter.queues().values().flat_map(|queue| queue.dots()),
+            self.interpreter
+                .queues()
+                .values()
+                .flat_map(|queue| queue.dots()),
         )
     }
 

@@ -177,11 +177,7 @@ impl DotsInterpreter {
     }
 
     pub fn new(module: DotsModule) -> Self {
-        Self::from_linked(
-            module,
-            FxHashMap::default(),
-            ExecutionBackend::SingleThread,
-        )
+        Self::from_linked(module, FxHashMap::default(), ExecutionBackend::SingleThread)
     }
 
     fn from_linked(
@@ -198,11 +194,11 @@ impl DotsInterpreter {
                 (name, FunctionDefinition::Ascii(pos))
             })
             .collect();
-        
+
         function_map.extend(
-            native_imports.into_iter().map(|name| {
-                (name.clone(), FunctionDefinition::Native(name))
-            }),
+            native_imports
+                .into_iter()
+                .map(|name| (name.clone(), FunctionDefinition::Native(name))),
         );
 
         let mut function_name_to_id: FxHashMap<Arc<str>, u32> = FxHashMap::default();

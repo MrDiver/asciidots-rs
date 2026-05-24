@@ -401,4 +401,3 @@ pub fn default_native_library() -> Vec<Box<dyn NativeFunction<DotMachine>>> {
         Box::new(PopScopeNative::new()),
     ]
 }
-

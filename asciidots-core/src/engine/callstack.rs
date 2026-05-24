@@ -1,5 +1,5 @@
-use std::hash::{Hash, Hasher};
 use smallvec::SmallVec;
+use std::hash::{Hash, Hasher};
 
 pub trait Callstackable<T: Clone + Hash> {
     fn callstack(&self) -> &Callstack<T>;

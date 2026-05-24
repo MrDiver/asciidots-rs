@@ -129,22 +129,19 @@ fn warp_parser(i: Span) -> IResult<Span, Vec<PreambleStatement>> {
     let (i, chars) = alpha1(i)?;
     let (_, warps) = many1(anychar).parse(chars)?;
     let (i, _) = space0(i)?;
-    Ok((i, vec![PreambleStatement::Warps {
+    Ok((
+        i,
+        vec![PreambleStatement::Warps {
             warps,
             span: into_span(chars),
-        }]))
+        }],
+    ))
 }
 
 fn ascii_token_parser(i: Span) -> IResult<Span, AsciiToken> {
     let span: SourceSpan = (i.location_offset(), 1).into();
     let (i, c) = anychar(i)?;
-    Ok((
-        i,
-        AsciiToken {
-            repr: c,
-            span,
-        },
-    ))
+    Ok((i, AsciiToken { repr: c, span }))
 }
 
 fn grid_line_parser(i: Span) -> IResult<Span, Vec<AsciiToken>> {
@@ -164,8 +161,11 @@ fn grid_parser(i: Span) -> IResult<Span, Vec<Vec<AsciiToken>>> {
 }
 
 fn dot_module_parser(i: Span) -> IResult<Span, DotsSource> {
-    let (i, preamble_parts) =
-        many0(terminated(alt((from_import_parser, warp_parser)), line_ending)).parse(i)?;
+    let (i, preamble_parts) = many0(terminated(
+        alt((from_import_parser, warp_parser)),
+        line_ending,
+    ))
+    .parse(i)?;
     let preamble = preamble_parts.into_iter().flatten().collect();
     let (i, tokens) = grid_parser(i)?;
     Ok((

@@ -71,7 +71,12 @@ impl DisplayWorker {
 
             while !stop_thread.load(Ordering::Relaxed) && window.is_open() {
                 let (width, height, scale, buffer) = match shared_thread.lock() {
-                    Ok(shared) => (shared.width, shared.height, shared.scale, shared.buffer.clone()),
+                    Ok(shared) => (
+                        shared.width,
+                        shared.height,
+                        shared.scale,
+                        shared.buffer.clone(),
+                    ),
                     Err(_) => break,
                 };
 
@@ -158,7 +163,11 @@ fn build_scaled_buffer(
 }
 
 fn normalized_phase(value: f64) -> f64 {
-    if !value.is_finite() { 0.0 } else { value.abs().fract() }
+    if !value.is_finite() {
+        0.0
+    } else {
+        value.abs().fract()
+    }
 }
 
 fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
@@ -166,12 +175,19 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
     let m = l - c / 2.0;
-    let (r1, g1, b1) = if h < 60.0 { (c, x, 0.0) }
-        else if h < 120.0 { (x, c, 0.0) }
-        else if h < 180.0 { (0.0, c, x) }
-        else if h < 240.0 { (0.0, x, c) }
-        else if h < 300.0 { (x, 0.0, c) }
-        else { (c, 0.0, x) };
+    let (r1, g1, b1) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
     let to_u8 = |v: f64| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
     (to_u8(r1), to_u8(g1), to_u8(b1))
 }
@@ -181,12 +197,19 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     let c = v * s;
     let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
     let m = v - c;
-    let (r1, g1, b1) = if h < 60.0 { (c, x, 0.0) }
-        else if h < 120.0 { (x, c, 0.0) }
-        else if h < 180.0 { (0.0, c, x) }
-        else if h < 240.0 { (0.0, x, c) }
-        else if h < 300.0 { (x, 0.0, c) }
-        else { (c, 0.0, x) };
+    let (r1, g1, b1) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
     let to_u8 = |v: f64| ((v + m).clamp(0.0, 1.0) * 255.0).round() as u8;
     (to_u8(r1), to_u8(g1), to_u8(b1))
 }
@@ -254,7 +277,9 @@ impl MinifbDisplayBackend {
     }
 
     fn update_dimensions_if_ready(&mut self) {
-        let Some((width, height)) = self.dimensions() else { return; };
+        let Some((width, height)) = self.dimensions() else {
+            return;
+        };
 
         if self.worker.as_ref().is_some_and(|w| w.is_finished()) {
             self.shutdown_worker();
@@ -266,7 +291,9 @@ impl MinifbDisplayBackend {
             .and_then(|w| w.shared.lock().ok())
             .is_some_and(|s| s.width == width && s.height == height && s.scale == self.scale);
 
-        if worker_matches { return; }
+        if worker_matches {
+            return;
+        }
 
         self.shutdown_worker();
         self.worker = DisplayWorker::spawn(width, height, self.scale);
@@ -306,8 +333,12 @@ impl DisplayBackend for MinifbDisplayBackend {
                 self.mode = mode;
             }
             DisplayCommand::SetPixel { index, value } => {
-                let Some(worker) = self.worker.as_ref() else { return; };
-                let Ok(mut shared) = worker.shared.lock() else { return; };
+                let Some(worker) = self.worker.as_ref() else {
+                    return;
+                };
+                let Ok(mut shared) = worker.shared.lock() else {
+                    return;
+                };
                 if index < shared.buffer.len() {
                     shared.buffer[index] = color_for_value(self.mode, value);
                 }

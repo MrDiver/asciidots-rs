@@ -69,9 +69,7 @@ impl GridModel for AsciiMapModel<'_> {
                 AsciiCell::OperatorBegin(_) | AsciiCell::OperatorEnd(_) => {
                     GridCellKind::OperatorDelimiter
                 }
-                AsciiCell::Operator { .. }
-                    if self.operator_with_dots.contains(&pos) =>
-                {
+                AsciiCell::Operator { .. } if self.operator_with_dots.contains(&pos) => {
                     GridCellKind::ActiveOperatorWithDots
                 }
                 AsciiCell::Operator { .. } => GridCellKind::Operator,

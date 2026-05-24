@@ -1,5 +1,5 @@
-use std::time::Instant;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use asciidots_core::linker;
 use asciidots_core::native::nativelib::default_native_library_for;
@@ -24,9 +24,9 @@ fn build_executor(path: &PathBuf) -> GraphExecutor {
 
 fn main() {
     // Test with fixture juliaset_small
-    let small_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/graph_juliaset_small.dots");
-    
+    let small_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/graph_juliaset_small.dots");
+
     println!("Benchmarking juliaset_small.dots to 10,000 steps...");
     let mut executor = build_executor(&small_path);
     let start = Instant::now();

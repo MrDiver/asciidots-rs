@@ -11,7 +11,9 @@ pub trait IsTrue {
     fn is_true(&self) -> bool;
 }
 
-pub trait EngineDot: Oriented + Directed + Pairable + Operand<Self::Value> + IsTrue + Send + Sync {
+pub trait EngineDot:
+    Oriented + Directed + Pairable + Operand<Self::Value> + IsTrue + Send + Sync
+{
     type Value: DotValue;
     type CallstackKey: Clone + Hash + Default;
 

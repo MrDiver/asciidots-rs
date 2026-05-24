@@ -20,7 +20,11 @@ pub struct DotsModule {
 
 impl DotsModule {
     pub fn new(field: AsciiField, functions: Vec<AsciiFunc>, native_names: Vec<String>) -> Self {
-        Self { field, functions, native_names }
+        Self {
+            field,
+            functions,
+            native_names,
+        }
     }
 
     pub fn unpack(self) -> (AsciiField, Vec<AsciiFunc>, Vec<String>) {
@@ -40,12 +44,17 @@ impl Parser {
     pub fn run(self) -> miette::Result<DotsModule> {
         let grid = self.module.grid();
         let preamble = self.module.preamble();
-        let aliases: FxHashMap<String, String> = preamble.iter().filter_map(|statement|{
-            match statement {
-                PreambleStatement::Import { name, alias: Some(alias),.. } => Some((alias.clone(), name.clone())),
+        let aliases: FxHashMap<String, String> = preamble
+            .iter()
+            .filter_map(|statement| match statement {
+                PreambleStatement::Import {
+                    name,
+                    alias: Some(alias),
+                    ..
+                } => Some((alias.clone(), name.clone())),
                 _ => None,
-            }
-        }).collect();
+            })
+            .collect();
         let warps: FxHashSet<char> = preamble
             .iter()
             .filter_map(|statement| match statement {
@@ -184,28 +193,26 @@ impl Parser {
                             AsciiCell::AddrMarker
                         }
                     }
-                    '%' => {
-                        match get_name(x, y) {
-                            Some(name) if name == "display" => {
-                                let id = display_counter;
-                                display_counter += 1;
-                                AsciiCell::Display(id)
-                            }
-                            Some(name) => {
-                                if let Some(original) = aliases.get(&name) {
-                                    AsciiCell::Call(Arc::from(original.clone()))
-                                } else {
-                                    AsciiCell::Call(Arc::from(name.clone()))
-                                }
-                            },
-                            None => {
-                                diagnostics.push(ParsingError::MissingNameForCallOperator {
-                                    _span: token.span(),
-                                });
-                                AsciiCell::Empty
+                    '%' => match get_name(x, y) {
+                        Some(name) if name == "display" => {
+                            let id = display_counter;
+                            display_counter += 1;
+                            AsciiCell::Display(id)
+                        }
+                        Some(name) => {
+                            if let Some(original) = aliases.get(&name) {
+                                AsciiCell::Call(Arc::from(original.clone()))
+                            } else {
+                                AsciiCell::Call(Arc::from(name.clone()))
                             }
                         }
-                    }
+                        None => {
+                            diagnostics.push(ParsingError::MissingNameForCallOperator {
+                                _span: token.span(),
+                            });
+                            AsciiCell::Empty
+                        }
+                    },
                     '$' => AsciiCell::Write,
                     '?' => AsciiCell::Read,
                     '"' => AsciiCell::Quote,

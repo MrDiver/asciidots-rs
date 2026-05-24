@@ -61,9 +61,7 @@ impl TracingDot {
 }
 
 impl Tracer {
-    pub fn new(
-        module: DotsModule,
-    ) -> Self {
+    pub fn new(module: DotsModule) -> Self {
         let (mut asciifield, functions, native_names) = module.unpack();
         let mut function_map: FxHashMap<String, FunctionKind> = functions
             .iter()
@@ -90,14 +88,14 @@ impl Tracer {
         let mut call_entry_nodes_by_pos = FxHashMap::default();
         let mut func_entry_nodes = FxHashMap::default();
         let mut nodes = Vec::default();
-        for (func_id,func) in function_defs.iter().enumerate() {
+        for (func_id, func) in function_defs.iter().enumerate() {
             if let FunctionKind::Ascii(pos) = func {
-                if !call_entry_nodes_by_pos.contains_key(pos){
+                if !call_entry_nodes_by_pos.contains_key(pos) {
                     let id = nodes.len();
                     nodes.push(Node::new(*pos, NodeType::CallEnter));
                     call_entry_nodes_by_pos.insert(*pos, id);
                     func_entry_nodes.insert(func_id as u32, id);
-                }else{
+                } else {
                     let id = *call_entry_nodes_by_pos.get(pos).unwrap();
                     func_entry_nodes.insert(func_id as u32, id);
                 }
@@ -126,7 +124,11 @@ impl Tracer {
     }
 
     pub fn into_graph(self) -> Graph {
-        trace!("[Tracer] Tracing complete. Nodes: {}, Edges: {}", self.nodes.len(), self.edges.len());
+        trace!(
+            "[Tracer] Tracing complete. Nodes: {}, Edges: {}",
+            self.nodes.len(),
+            self.edges.len()
+        );
         trace!("Func entry map: {:#?}", self.func_entry_nodes);
         Graph {
             nodes: self.nodes,
@@ -134,7 +136,7 @@ impl Tracer {
             func_entry_nodes: self.func_entry_nodes,
         }
     }
-    
+
     pub fn get_max_pending(&self) -> usize {
         self.max_pending
     }
@@ -408,21 +410,33 @@ impl Tracer {
 
             AsciiCell::Call(name) => {
                 // Unresolved call — resolve_calls() couldn't match the name to a known function.
-                unreachable!("Unresolved call to {:?} at {:?} — should have been resolved to CallById or caused a compile error", name, pos);
+                unreachable!(
+                    "Unresolved call to {:?} at {:?} — should have been resolved to CallById or caused a compile error",
+                    name, pos
+                );
             }
             AsciiCell::CallById(func_id) => {
-                trace!("Resolving call to func_id {} at {:?} with from_call={} in dir {:?} ", func_id, pos, from_call, dir);
+                trace!(
+                    "Resolving call to func_id {} at {:?} with from_call={} in dir {:?} ",
+                    func_id, pos, from_call, dir
+                );
                 let call_kind = match self.function_defs.get(*func_id as usize) {
                     Some(FunctionKind::Native(name)) => CallKind::NativeCall(name.clone()),
                     Some(FunctionKind::Ascii(_)) | None => CallKind::AsciiCall(*func_id),
                 };
-                trace!("Resolved call kind: {:?}, func_entry_dirs: {:#?}", call_kind, self.func_entry_dirs);
+                trace!(
+                    "Resolved call kind: {:?}, func_entry_dirs: {:#?}",
+                    call_kind, self.func_entry_dirs
+                );
                 Some(self.get_or_insert_pos(pos, NodeType::Call(call_kind)))
             }
 
             AsciiCell::DefRet(name) => {
                 if from_call {
-                    trace!("Resolving call to {:?} at {:?} with from_call=true", name, pos);
+                    trace!(
+                        "Resolving call to {:?} at {:?} with from_call=true",
+                        name, pos
+                    );
                     let func_id = self
                         .function_name_to_id
                         .get(name.as_str())
@@ -442,7 +456,10 @@ impl Tracer {
                 }
             }
 
-            _ => panic!("Cell type {:?} should have been handled by step() passthrough logic, not get_or_create_node", cell),
+            _ => panic!(
+                "Cell type {:?} should have been handled by step() passthrough logic, not get_or_create_node",
+                cell
+            ),
         }
     }
 
@@ -617,7 +634,8 @@ impl Tracer {
 
     fn prune_duplicate_edges(&mut self) {
         let mut unique_edges = FxHashSet::default();
-        self.edges.retain(|edge| unique_edges.insert((edge.from, edge.to)));
+        self.edges
+            .retain(|edge| unique_edges.insert((edge.from, edge.to)));
     }
 
     fn enqueue_tracer(

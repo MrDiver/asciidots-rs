@@ -27,7 +27,10 @@ fn dot_moves_right_then_dies_at_boundary() {
 #[test]
 fn mirror_turns_dot_downward() {
     let mut interpreter = interpreter_from(MIRROR_TURN);
-    assert_positions_trace(&mut interpreter, &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(2, 2)]]);
+    assert_positions_trace(
+        &mut interpreter,
+        &[&[(0, 1)], &[(1, 1)], &[(2, 1)], &[(2, 2)]],
+    );
 }
 
 #[test]

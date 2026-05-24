@@ -2,9 +2,7 @@ use std::{hint::black_box, path::PathBuf};
 
 use asciidots_core::{linker, native::nativelib::default_native_library_for};
 use asciidots_graph::{
-    compiler::tracer::Tracer,
-    ir::dot::GraphDot,
-    runtime::executor::GraphExecutor,
+    compiler::tracer::Tracer, ir::dot::GraphDot, runtime::executor::GraphExecutor,
 };
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rustc_hash::FxHashSet;
@@ -63,8 +61,7 @@ fn bench_executor_current_state(c: &mut Criterion) {
 fn bench_executor_runtime_only(c: &mut Criterion) {
     let mut group = c.benchmark_group("executor_runtime_only");
 
-    let basic_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/basic.dots");
+    let basic_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/basic.dots");
     group.bench_function("basic_500_steps", |b| {
         let mut executor = build_executor(&basic_path);
         for _ in 0..64 {
@@ -107,8 +104,8 @@ fn bench_full_juliaset_completion(c: &mut Criterion) {
     group.measurement_time(std::time::Duration::from_secs(25));
     group.sample_size(10);
 
-    let juliaset_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../asciidots-core/tests/fixtures/juliaset/juliaset.dots");
+    let juliaset_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../asciidots-core/tests/fixtures/juliaset/juliaset.dots");
     group.bench_function("juliaset_full_10000_steps", |b| {
         b.iter_batched(
             || build_executor(&juliaset_path),
@@ -155,5 +152,11 @@ fn bench_long_running_completion(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_executor_current_state, bench_executor_runtime_only, bench_full_juliaset_completion, bench_long_running_completion);
+criterion_group!(
+    benches,
+    bench_executor_current_state,
+    bench_executor_runtime_only,
+    bench_full_juliaset_completion,
+    bench_long_running_completion
+);
 criterion_main!(benches);

@@ -7,7 +7,10 @@ use asciidots_core::{
 };
 use asciidots_graph::{
     compiler::tracer::Tracer,
-    ir::{dot::GraphDot, graph::{Graph, NodeType}},
+    ir::{
+        dot::GraphDot,
+        graph::{Graph, NodeType},
+    },
     runtime::executor::GraphExecutor,
 };
 use rustc_hash::FxHashSet;
@@ -446,8 +449,14 @@ fn juliaset_small_event_counts_match_expected() {
         pixels: 100,
     };
 
-    assert_eq!(core_counts, expected, "core event counts changed unexpectedly");
-    assert_eq!(graph_counts, expected, "graph event counts changed unexpectedly");
+    assert_eq!(
+        core_counts, expected,
+        "core event counts changed unexpectedly"
+    );
+    assert_eq!(
+        graph_counts, expected,
+        "graph event counts changed unexpectedly"
+    );
 }
 
 /// Diagnostic: traces both runtimes on juliaset_small for 500 steps, printing a summary
@@ -502,11 +511,7 @@ fn juliaset_small_trace() {
             for edge in graph.edges.iter().filter(|edge| edge.to.0 == display_id) {
                 println!(
                     "  from node#{} {:?} via {:?} ticks={} -> {:?}",
-                    edge.from.0,
-                    graph.nodes[edge.from.0],
-                    edge.from.1,
-                    edge.ticks,
-                    edge.to.1
+                    edge.from.0, graph.nodes[edge.from.0], edge.from.1, edge.ticks, edge.to.1
                 );
             }
         }
@@ -642,7 +647,13 @@ fn juliaset_small_trace() {
                     );
                 }
                 println!("  recent dead ends:");
-                for dead_end in executor.debug_recent_dead_ends().iter().rev().take(20).rev() {
+                for dead_end in executor
+                    .debug_recent_dead_ends()
+                    .iter()
+                    .rev()
+                    .take(20)
+                    .rev()
+                {
                     let (incoming, outgoing) = executor.debug_node_ports(dead_end.from_node);
                     println!(
                         "    step={} {} dir={:?} value={} addr={} incoming={incoming:?} outgoing={outgoing:?}",
@@ -706,10 +717,12 @@ fn testmem_tracing_keeps_callenter_and_return_separate_and_finishes_quickly() {
         .find(|(_, node)| matches!(node.t, NodeType::Return))
         .expect("expected a Return node for imported mem function");
 
-    assert_ne!(call_enter.0, return_node.0, "CallEnter and Return must be distinct nodes");
+    assert_ne!(
+        call_enter.0, return_node.0,
+        "CallEnter and Return must be distinct nodes"
+    );
     assert_eq!(
-        graph.nodes[call_enter.0].position,
-        graph.nodes[return_node.0].position,
+        graph.nodes[call_enter.0].position, graph.nodes[return_node.0].position,
         "CallEnter and Return should share the same function entry position"
     );
 
@@ -730,6 +743,12 @@ fn testmem_tracing_keeps_callenter_and_return_separate_and_finishes_quickly() {
         }
     }
 
-    assert!(core.is_finished(), "core interpreter should finish within 100 steps");
-    assert!(executor.is_finished(), "graph executor should finish within 100 steps");
+    assert!(
+        core.is_finished(),
+        "core interpreter should finish within 100 steps"
+    );
+    assert!(
+        executor.is_finished(),
+        "graph executor should finish within 100 steps"
+    );
 }

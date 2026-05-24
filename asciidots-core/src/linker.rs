@@ -10,8 +10,8 @@ use crate::native;
 use crate::{
     interpreter::AsciiField,
     parser::{
-        AsciiCell, AsciiFunc, DotsModule, ImportSource, LexError, Lexer,
-        LinkingErrorCollection, Parser, ParsingErrorCollection, PreambleStatement,
+        AsciiCell, AsciiFunc, DotsModule, ImportSource, LexError, Lexer, LinkingErrorCollection,
+        Parser, ParsingErrorCollection, PreambleStatement,
     },
     primitives::Position,
 };
@@ -81,9 +81,12 @@ pub fn link_file(
                 .remove(&module_path)
                 .expect("module order and module map must stay in sync");
             let (field, functions, _) = module.unpack();
-            let native_imports = module_native_imports.remove(&module_path).unwrap_or(Vec::new()).iter().map(|spec|
-                {spec.name.clone()}
-            ).collect();
+            let native_imports = module_native_imports
+                .remove(&module_path)
+                .unwrap_or(Vec::new())
+                .iter()
+                .map(|spec| spec.name.clone())
+                .collect();
             ParsedModule {
                 path: module_path,
                 field,
@@ -159,7 +162,7 @@ fn load_recursive(
         let PreambleStatement::Import {
             source,
             name,
-            alias:_,
+            alias: _,
             span,
         } = statement
         else {
@@ -176,10 +179,7 @@ fn load_recursive(
                     }
                 };
 
-                load_recursive(
-                    &import_target,
-                    ctx,
-                )?;
+                load_recursive(&import_target, ctx)?;
             }
             ImportSource::Native => {
                 if !ctx.available_native_functions.contains(name) {
@@ -196,9 +196,7 @@ fn load_recursive(
                     continue;
                 }
 
-                native_imports.push(NativeImportSpec {
-                    name: name.clone(),
-                });
+                native_imports.push(NativeImportSpec { name: name.clone() });
             }
         }
     }
@@ -278,9 +276,7 @@ fn resolve_import(base_directory: &Path, import_path: &str) -> miette::Result<Pa
         .wrap_err_with(|| format!("failed to resolve import '{}'", with_extension.display()))
 }
 
-fn merge_modules(
-    modules: Vec<ParsedModule>,
-) -> DotsModule {
+fn merge_modules(modules: Vec<ParsedModule>) -> DotsModule {
     if modules.is_empty() {
         return DotsModule::new(AsciiField::new(0, 0), Vec::new(), Vec::new());
     }
