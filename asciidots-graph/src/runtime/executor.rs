@@ -12,7 +12,7 @@ use smallvec::SmallVec;
 use asciidots_core::{
     engine::{
         dot_trait::{EngineDot, IsTrue},
-        operator::{ConditionalOperator, Operator},
+        operator::{ArithOp, ConditionalOperator, Operator},
     },
     interpreter::{ColorMode, DisplayCommand, InterpreterCommand, InterpreterResult},
     native::NativeFunction,
@@ -115,15 +115,17 @@ impl GraphExecutor {
         for (id, node) in graph.nodes.iter().enumerate() {
             match &node.t {
                 NodeType::Operator(c, orientation) => {
-                    operator_queues.insert(
-                        id,
-                        Operator {
-                            c: *c,
-                            queue: Default::default(),
-                            kind: *orientation,
-                            _marker: std::marker::PhantomData,
-                        },
-                    );
+                    if let Some(op) = ArithOp::from_char(*c) {
+                        operator_queues.insert(
+                            id,
+                            Operator {
+                                op,
+                                queue: Default::default(),
+                                kind: *orientation,
+                                _marker: std::marker::PhantomData,
+                            },
+                        );
+                    }
                 }
                 NodeType::Conditional(negated) => {
                     conditional_queues.insert(

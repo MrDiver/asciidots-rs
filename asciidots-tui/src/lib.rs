@@ -949,6 +949,8 @@ fn interpreter_thread(
     display_reg_tx: mpsc::Sender<DisplayReg>,
 ) {
     let mut display_backends: FxHashMap<u32, Box<dyn DisplayBackend>> = FxHashMap::default();
+    // Clock lives in the stepping thread; tick_speed is read from the controller.
+    let mut clock = Instant::now();
 
     // Route Display events to local backends; forward everything else to the UI.
     let route = |results: Vec<InterpreterResult>,
@@ -1023,15 +1025,23 @@ fn interpreter_thread(
             break;
         }
 
+        // Check if it's time to step. tick_speed is a config on the controller;
+        // the clock is local to this thread.
+        let tick_speed = shared.read().unwrap().tick_speed();
+        if clock.elapsed() < tick_speed {
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        }
+        clock = Instant::now();
+
         // Run steps for at most 8 ms, then release the lock so the UI thread
         // can always get a read lock within that window.
         let results = shared
             .write()
             .unwrap()
-            .tick_budgeted(Duration::from_millis(8));
+            .run_steps_budgeted(Duration::from_millis(8));
 
         if results.is_empty() {
-            // Not running or tick_speed hasn't elapsed yet — avoid busy-spin.
             thread::sleep(Duration::from_millis(1));
             continue;
         }

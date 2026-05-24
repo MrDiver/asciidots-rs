@@ -91,6 +91,16 @@ pub enum ParsingError {
         #[label("Sink here")]
         _span: miette::SourceSpan,
     },
+    #[error("parse error: unknown character '{ch}'")]
+    #[diagnostic(
+        code(asciidots::parse::unknown_character),
+        help("Remove or replace this character")
+    )]
+    UnknownCharacter {
+        ch: char,
+        #[label("unknown character")]
+        _span: miette::SourceSpan,
+    },
 }
 
 #[derive(Error, Debug, Diagnostic, Clone)]

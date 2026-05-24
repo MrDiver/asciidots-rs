@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -6,8 +5,9 @@ use log::trace;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
+    filesystem::{Filesystem, NativeFilesystem},
     linker,
-    native::{self, NativeFunction, nativelib},
+    native::{NativeFunction, nativelib},
     parser::{AsciiCell, DotsModule, Lexer, Parser, SpanToken},
     primitives::{Direction, Orientation, Position},
     state_machine::{DotMachine, MachineEvent, MachineState, RuntimeDiagnostic},
@@ -129,9 +129,19 @@ impl DotsInterpreterBuilder {
     }
 
     pub fn build_from_file(self, path: impl AsRef<Path>) -> miette::Result<DotsInterpreter> {
+        let fs = NativeFilesystem;
+        let path_str = path.as_ref().to_string_lossy();
+        self.build_with_fs(&path_str, &fs)
+    }
+
+    pub fn build_with_fs(
+        self,
+        entry_path: &str,
+        fs: &dyn Filesystem,
+    ) -> miette::Result<DotsInterpreter> {
         let available_native_functions: FxHashSet<String> =
             self.native_registry.keys().cloned().collect();
-        let linked = linker::link_file(path.as_ref(), &available_native_functions)?;
+        let linked = linker::link_with_fs(entry_path, fs, &available_native_functions)?;
         Ok(DotsInterpreter::from_linked(
             linked.module,
             self.native_registry,
@@ -274,14 +284,15 @@ impl DotsInterpreter {
                     }
                 }
                 AsciiCell::Operator { orientation, repr } => {
-                    self.operator_map
-                        .insert((x, y), OperatorQueues::new(orientation, repr, false));
+                    if let Some(queue) = OperatorQueues::new(orientation, repr, false) {
+                        self.operator_map.insert((x, y), queue);
+                    }
                 }
                 AsciiCell::Conditional(negated) => {
-                    self.operator_map.insert(
-                        (x, y),
-                        OperatorQueues::new(Orientation::Horizontal, '~', negated),
-                    );
+                    if let Some(queue) = OperatorQueues::new(Orientation::Horizontal, '~', negated)
+                    {
+                        self.operator_map.insert((x, y), queue);
+                    }
                 }
                 _ => {}
             }
@@ -313,148 +324,180 @@ impl DotsInterpreter {
         self.native_returned_dots = native_returned_dots;
     }
 
-    fn process_active_dots_single_thread(&mut self) {
+    fn handle_end_program(&mut self) {
+        self.results.push(InterpreterResult::EndProgram);
+        self.finished = true;
+        self.dots.clear();
+        self.pending_dots.clear();
+    }
+
+    fn handle_assertion_failed(&mut self, expected: f64, found: f64, dot_index: usize) {
+        let span = self
+            .field
+            .at_spanned(self.dots[dot_index].position())
+            .span();
+        self.diagnostics
+            .push(RuntimeDiagnostic::assertion_failed(expected, found, span));
+        self.finished = true;
+        self.dots.clear();
+        self.pending_dots.clear();
+    }
+
+    /// Returns true if the dot was removed from `self.dots` (caller must not advance i).
+    fn handle_operator(&mut self, i: usize, event: &MachineEvent) -> bool {
         let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
-        let mut i = 0;
-        let mut repeat_iteration = false;
-        while i < self.dots.len() {
+        let mut dot = self.dots.swap_remove(i);
+        dot.next(event, &default_token);
+        let opqueue = self
+            .operator_map
+            .get_mut(&(dot.position().into()))
+            .unwrap_or_else(|| unreachable!());
+        if let Some(paired) = opqueue.push_and_get_result(dot) {
+            self.dots.push(paired);
+        }
+        true
+    }
+
+    fn handle_io_event(&mut self, event: &MachineEvent, dot_index: usize) {
+        match event {
+            MachineEvent::Input(uuid) => {
+                self.results.push(InterpreterResult::InputRequest(*uuid));
+            }
+            MachineEvent::PrintLn(s) => {
+                self.results.push(InterpreterResult::PrintLn(s.clone()));
+            }
+            MachineEvent::PrintChar(c) => {
+                self.results.push(InterpreterResult::PrintChar(*c));
+            }
+            _ => {}
+        }
+        let lookahead = self.field.at_spanned(self.dots[dot_index].position());
+        self.dots[dot_index].next(&MachineEvent::Nothing, lookahead);
+    }
+
+    /// Returns true if the dot was consumed (display killed it), false if it advanced.
+    fn handle_display(
+        &mut self,
+        display_id: u32,
+        direction: Direction,
+        addr: f64,
+        value: f64,
+        i: usize,
+    ) -> bool {
+        let command = match direction {
+            Direction::Right => DisplayCommand::SetWidth(value.round() as usize),
+            Direction::Up => DisplayCommand::SetHeight(value.round() as usize),
+            Direction::Left => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
+            Direction::Down => DisplayCommand::SetPixel {
+                index: addr as usize,
+                value,
+            },
+        };
+        self.results.push(InterpreterResult::Display {
+            display_id,
+            command,
+        });
+        if direction == Direction::Down {
             let dot = &mut self.dots[i];
-            let token = self.field.at_spanned(dot.position());
-            let event = match dot.process(token, &mut self.pending_dots) {
+            dot.dot_mut().set_dir(Direction::Up).step();
+            let lookahead = self.field.at_spanned(dot.position());
+            dot.next(&MachineEvent::Nothing, lookahead);
+            false
+        } else {
+            self.dots.swap_remove(i);
+            true
+        }
+    }
+
+    fn handle_call_by_id(&mut self, call_id: u32, i: usize) -> bool {
+        let fun = self.functions.get(call_id as usize);
+        match fun {
+            Some(FunctionDefinition::Ascii(fun)) => {
+                let pos: Position = (fun.x, fun.y).into();
+                let current = self.field.at_spanned(&pos);
+                self.dots[i].dot_mut().call(pos).step();
+                self.dots[i].next(&MachineEvent::Nothing, current);
+                false
+            }
+            Some(FunctionDefinition::Native(native_name)) => {
+                let native_name = native_name.clone();
+                let mut dot = self.dots.swap_remove(i);
+                let call_site = *dot.position();
+                dot.dot_mut().call(call_site);
+                if let Some(native_fun) = self.native_registry.get_mut(&native_name) {
+                    native_fun.dot_enter(dot);
+                } else {
+                    self.diagnostics
+                        .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                            name: format!("#{call_id}"),
+                            span: self.field.at_spanned(&call_site).span(),
+                        });
+                }
+                true
+            }
+            None => {
+                let span = self.field.at_spanned(self.dots[i].position()).span();
+                self.diagnostics
+                    .push(RuntimeDiagnostic::MissingFunctionDefinition {
+                        name: format!("#{call_id}"),
+                        span,
+                    });
+                false
+            }
+        }
+    }
+
+    fn process_active_dots_single_thread(&mut self) {
+        let mut i = 0;
+        while i < self.dots.len() {
+            let token = self.field.at_spanned(self.dots[i].position());
+            let event = match self.dots[i].process(token, &mut self.pending_dots) {
                 Ok(e) => e,
                 Err(d) => {
                     self.diagnostics.push(d);
                     MachineEvent::EndProgram
                 }
             };
-            match event {
+
+            let consumed = match event {
                 MachineEvent::EndProgram => {
-                    self.results.push(InterpreterResult::EndProgram);
-                    self.finished = true;
-                    self.dots.clear();
-                    self.pending_dots.clear();
-                    break;
+                    self.handle_end_program();
+                    return;
                 }
-                MachineEvent::HitOperator => {
-                    let mut dot = self.dots.swap_remove(i);
-                    dot.next(&event, &default_token);
-                    let opqueue = self
-                        .operator_map
-                        .get_mut(&(dot.position().into()))
-                        .unwrap_or_else(|| unreachable!());
-                    if let Some(dot) = opqueue.push_and_get_result(dot) {
-                        self.dots.push(dot)
-                    }
-                    repeat_iteration = true;
+                MachineEvent::AssertionFailed { expected, found } => {
+                    self.handle_assertion_failed(expected, found, i);
+                    return;
                 }
-                MachineEvent::Input(uuid) => {
-                    self.results.push(InterpreterResult::InputRequest(uuid));
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, lookahead)
-                }
-                MachineEvent::PrintLn(s) => {
-                    self.results.push(InterpreterResult::PrintLn(s));
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, lookahead)
-                }
-                MachineEvent::PrintChar(c) => {
-                    self.results.push(InterpreterResult::PrintChar(c));
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&MachineEvent::Nothing, lookahead)
+                MachineEvent::HitOperator => self.handle_operator(i, &event),
+                MachineEvent::Input(_) | MachineEvent::PrintLn(_) | MachineEvent::PrintChar(_) => {
+                    self.handle_io_event(&event, i);
+                    false
                 }
                 MachineEvent::Display {
                     display_id,
                     direction,
                     addr,
                     value,
-                } => {
-                    let command = match direction {
-                        Direction::Right => DisplayCommand::SetWidth(value.round() as usize),
-                        Direction::Up => DisplayCommand::SetHeight(value.round() as usize),
-                        Direction::Left => DisplayCommand::SetColorMode(ColorMode::from_f64(value)),
-                        Direction::Down => DisplayCommand::SetPixel {
-                            index: addr as usize,
-                            value,
-                        },
-                    };
-                    self.results.push(InterpreterResult::Display {
-                        display_id,
-                        command,
-                    });
-                    if direction == Direction::Down {
-                        let dot = &mut self.dots[i];
-                        dot.dot_mut().set_dir(Direction::Up).step();
-                        let lookahead = self.field.at_spanned(dot.position());
-                        dot.next(&MachineEvent::Nothing, lookahead);
-                        i += 1;
-                    } else {
-                        self.dots.swap_remove(i);
-                        repeat_iteration = true;
-                    }
-                }
-                MachineEvent::AssertionFailed { expected, found } => {
-                    self.diagnostics.push(RuntimeDiagnostic::assertion_failed(
-                        expected,
-                        found,
-                        self.field.at_spanned(dot.position()).span(),
-                    ));
-                    self.finished = true;
-                    self.dots.clear();
-                    self.pending_dots.clear();
-                    break;
-                }
+                } => self.handle_display(display_id, direction, addr, value, i),
                 MachineEvent::Call(_, name) => {
-                    let current = self.field.at_spanned(dot.position());
+                    let span = self.field.at_spanned(self.dots[i].position()).span();
                     self.diagnostics
                         .push(RuntimeDiagnostic::MissingFunctionDefinition {
                             name: name.to_string(),
-                            span: current.span(),
+                            span,
                         });
+                    false
                 }
-                MachineEvent::CallById(_, call_id) => {
-                    let fun = self.functions.get(call_id as usize);
-                    match fun {
-                        Some(FunctionDefinition::Ascii(fun)) => {
-                            let pos: Position = (fun.x, fun.y).into();
-                            let current = self.field.at_spanned(&pos);
-                            dot.dot_mut().call(pos).step();
-                            dot.next(&MachineEvent::Nothing, current)
-                        }
-                        Some(FunctionDefinition::Native(native_name)) => {
-                            let mut dot = self.dots.swap_remove(i);
-                            let call_site = *dot.position();
-                            dot.dot_mut().call(call_site);
-                            if let Some(native_fun) = self.native_registry.get_mut(native_name) {
-                                native_fun.dot_enter(dot);
-                                repeat_iteration = true;
-                            } else {
-                                self.diagnostics.push(
-                                    RuntimeDiagnostic::MissingFunctionDefinition {
-                                        name: format!("#{call_id}"),
-                                        span: self.field.at_spanned(dot.position()).span(),
-                                    },
-                                );
-                            }
-                        }
-                        None => {
-                            let current = self.field.at_spanned(dot.position());
-                            self.diagnostics
-                                .push(RuntimeDiagnostic::MissingFunctionDefinition {
-                                    name: format!("#{call_id}"),
-                                    span: current.span(),
-                                });
-                        }
-                    }
-                }
+                MachineEvent::CallById(_, call_id) => self.handle_call_by_id(call_id, i),
                 _ => {
-                    let lookahead = self.field.at_spanned(dot.position());
-                    dot.next(&event, lookahead)
+                    let lookahead = self.field.at_spanned(self.dots[i].position());
+                    self.dots[i].next(&event, lookahead);
+                    false
                 }
-            }
-            if !repeat_iteration {
+            };
+
+            if !consumed {
                 i += 1;
-            } else {
-                repeat_iteration = false;
             }
         }
     }

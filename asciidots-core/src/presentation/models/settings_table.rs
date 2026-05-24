@@ -4,7 +4,6 @@ use crate::presentation::model_traits::{TableCell, TableCellKind, TableModel};
 
 const HEADERS: [&str; 2] = ["Setting", "Value"];
 
-// Row 0-5 are runtime stats; rows 6+ are static key-binding hints.
 const HINTS: &[(&str, &str)] = &[
     ("Space", "Run/Pause"),
     ("n", "Single Step"),
@@ -20,16 +19,13 @@ const HINTS: &[(&str, &str)] = &[
     ("Esc", "Quit"),
 ];
 
-const STAT_ROWS: usize = 6;
+const STAT_ROWS: usize = 5;
 
-/// Lazy settings model — stores raw values and computes cells on demand.
-/// No heap allocation at construction time.
 pub struct SettingsTableModel {
     running: bool,
     tick_speed: Duration,
     steps_per_tick: usize,
     tick_count: usize,
-    last_step_duration: Duration,
     num_dots: usize,
 }
 
@@ -39,7 +35,6 @@ impl SettingsTableModel {
         tick_speed: Duration,
         steps_per_tick: usize,
         tick_count: usize,
-        last_step_duration: Duration,
         num_dots: usize,
     ) -> Self {
         Self {
@@ -47,7 +42,6 @@ impl SettingsTableModel {
             tick_speed,
             steps_per_tick,
             tick_count,
-            last_step_duration,
             num_dots,
         }
     }
@@ -71,7 +65,6 @@ impl TableModel for SettingsTableModel {
             return None;
         }
 
-        // ── Runtime stats (rows 0-5) ──────────────────────────────────────────
         if row < STAT_ROWS {
             return Some(match (row, column) {
                 (0, 0) => TableCell::new("Num Dots", TableCellKind::Changeable).with_bold(true),
@@ -97,16 +90,10 @@ impl TableModel for SettingsTableModel {
                 }
                 (4, 0) => TableCell::new("Ticks", TableCellKind::Changeable),
                 (4, 1) => TableCell::new(format!("{}", self.tick_count), TableCellKind::Changing),
-                (5, 0) => TableCell::new("Last Step", TableCellKind::Changeable),
-                (5, 1) => TableCell::new(
-                    format!("{:?}", self.last_step_duration),
-                    TableCellKind::Default,
-                ),
                 _ => return None,
             });
         }
 
-        // ── Key-binding hints (rows 6+) ───────────────────────────────────────
         let hint_row = row - STAT_ROWS;
         let (key, action) = HINTS.get(hint_row)?;
         Some(match column {

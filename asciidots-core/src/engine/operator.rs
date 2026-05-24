@@ -112,36 +112,77 @@ pub trait Operand<V: DotValue>: Sized {
     fn apply_operator(self, other: Self, op: impl Fn(V, V) -> V) -> Self;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Pow,
+    Eq,
+    NotEq,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    BitAnd,
+    BitOr,
+    BitXor,
+}
+
+impl ArithOp {
+    pub fn from_char(c: char) -> Option<Self> {
+        Some(match c {
+            '+' => Self::Add,
+            '-' => Self::Sub,
+            '*' => Self::Mul,
+            '/' => Self::Div,
+            '%' => Self::Rem,
+            '^' => Self::Pow,
+            '=' => Self::Eq,
+            '!' => Self::NotEq,
+            '>' => Self::Gt,
+            '<' => Self::Lt,
+            'G' => Self::Gte,
+            'L' => Self::Lte,
+            '&' => Self::BitAnd,
+            '|' => Self::BitOr,
+            'x' => Self::BitXor,
+            _ => return None,
+        })
+    }
+
+    #[inline]
+    pub fn apply<V: DotValue>(self, a: V, b: V) -> V {
+        match self {
+            Self::Add => a + b,
+            Self::Sub => a - b,
+            Self::Mul => a * b,
+            Self::Div => a / b,
+            Self::Rem => a % b,
+            Self::Pow => a.pow(b),
+            Self::Eq => V::bool_val(a == b),
+            Self::NotEq => V::bool_val(a != b),
+            Self::Gt => V::bool_val(a > b),
+            Self::Lt => V::bool_val(a < b),
+            Self::Gte => V::bool_val(a >= b),
+            Self::Lte => V::bool_val(a <= b),
+            Self::BitAnd => a.bitand(b),
+            Self::BitOr => a.bitor(b),
+            Self::BitXor => a.bitxor(b),
+        }
+    }
+}
+
 pub struct Operator<T, V: DotValue>
 where
     T: Oriented + Pairable + Operand<V>,
 {
-    pub c: char,
+    pub op: ArithOp,
     pub queue: OperatorQueue<T>,
     pub kind: Orientation,
     pub _marker: std::marker::PhantomData<V>,
-}
-
-#[inline]
-fn operator_closure<V: DotValue>(op_char: char) -> fn(V, V) -> V {
-    match op_char {
-        '+' => V::add,
-        '-' => V::sub,
-        '*' => V::mul,
-        '/' => V::div,
-        '%' => V::rem,
-        '^' => V::pow,
-        '=' => |a, b| V::bool_val(a == b),
-        '!' => |a, b| V::bool_val(a != b),
-        '>' => |a, b| V::bool_val(a > b),
-        '<' => |a, b| V::bool_val(a < b),
-        'G' => |a, b| V::bool_val(a >= b),
-        'L' => |a, b| V::bool_val(a <= b),
-        '&' => V::bitand,
-        '|' => V::bitor,
-        'x' => V::bitxor,
-        _ => |a, _| a,
-    }
 }
 
 impl<T, V> Operator<T, V>
@@ -158,10 +199,10 @@ where
             Orientation::Horizontal => self.queue.push_horizontal_match_vertical(operand),
             Orientation::Vertical => self.queue.push_vertical_match_horizontal(operand),
         }?;
-        let op_closure = operator_closure::<V>(self.c);
+        let op = self.op;
         Some(match self.kind {
-            Orientation::Horizontal => horizontal.apply_operator(vertical, op_closure),
-            Orientation::Vertical => vertical.apply_operator(horizontal, op_closure),
+            Orientation::Horizontal => horizontal.apply_operator(vertical, |a, b| op.apply(a, b)),
+            Orientation::Vertical => vertical.apply_operator(horizontal, |a, b| op.apply(a, b)),
         })
     }
 }

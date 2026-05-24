@@ -1,5 +1,5 @@
 use crate::{
-    engine::operator::{ConditionalOperator, Operator},
+    engine::operator::{ArithOp, ConditionalOperator, Operator},
     primitives::Orientation,
     state_machine::DotMachine,
 };
@@ -15,7 +15,7 @@ pub struct OperatorQueues {
 }
 
 impl OperatorQueues {
-    pub(super) fn new(orientation: Orientation, op: char, negated: bool) -> Self {
+    pub(super) fn new(orientation: Orientation, op: char, negated: bool) -> Option<Self> {
         let kind = if op == '~' {
             OperatorKind::Conditional(ConditionalOperator {
                 queue: Default::default(),
@@ -23,13 +23,13 @@ impl OperatorQueues {
             })
         } else {
             OperatorKind::Arithmetic(Operator {
-                c: op,
+                op: ArithOp::from_char(op)?,
                 queue: Default::default(),
                 kind: orientation,
                 _marker: PhantomData,
             })
         };
-        Self { kind }
+        Some(Self { kind })
     }
 
     pub(super) fn push_and_get_result(&mut self, dot: DotMachine) -> Option<DotMachine> {

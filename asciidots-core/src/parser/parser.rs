@@ -232,7 +232,13 @@ impl Parser {
                         });
                         AsciiCell::Empty
                     }
-                    c => panic!("Not implemented yet {:#?}", c),
+                    c => {
+                        diagnostics.push(ParsingError::UnknownCharacter {
+                            ch: c,
+                            _span: token.span(),
+                        });
+                        AsciiCell::Empty
+                    }
                 };
                 let spanned = SpanToken::new(cell, token.repr(), token.span());
                 field.set_at(spanned, &(x, y).into());

@@ -13,6 +13,7 @@ pub enum AppCommand {
     Pause,
     Start,
     Reset,
+    /// Adjust tick delay in milliseconds (positive = slower, negative = faster).
     AdjustSpeed(i64),
     AdjustStepsPerFrame(i32),
     InputAnswer(u64, f64),
@@ -23,12 +24,12 @@ pub struct RuntimeController {
     interpreter: DotsInterpreter,
     source: String,
     source_file: Option<PathBuf>,
+    /// Target delay between ticks. The stepping thread owns the clock; this is
+    /// just the config it reads.
     tick_speed: Duration,
     steps_per_frame: usize,
     tick_count: usize,
-    last_step_duration: Duration,
     running: bool,
-    clock: Instant,
 }
 
 impl RuntimeController {
@@ -46,9 +47,7 @@ impl RuntimeController {
             tick_speed: Duration::from_millis(100),
             steps_per_frame: 1,
             tick_count: 0,
-            last_step_duration: Duration::ZERO,
             running: false,
-            clock: Instant::now(),
         })
     }
 
@@ -62,9 +61,7 @@ impl RuntimeController {
             tick_speed: Duration::from_millis(100),
             steps_per_frame: 1,
             tick_count: 0,
-            last_step_duration: Duration::ZERO,
             running: false,
-            clock: Instant::now(),
         })
     }
 
@@ -78,21 +75,51 @@ impl RuntimeController {
         if let Ok(interpreter) = rebuilt {
             self.interpreter = interpreter;
             self.tick_count = 0;
-            self.last_step_duration = Duration::ZERO;
             self.running = false;
-            self.clock = Instant::now();
         }
     }
 
-    fn run_steps(&mut self, count: usize) -> Vec<InterpreterResult> {
+    /// Run up to `count` steps. Stops early on input request or end.
+    pub fn run_steps(&mut self, count: usize) -> Vec<InterpreterResult> {
         let mut all_results = Vec::new();
         for _ in 0..count {
             if self.interpreter.is_finished() {
                 break;
             }
-            let start = Instant::now();
             let results = self.interpreter.step().unwrap().to_vec();
-            self.last_step_duration = start.elapsed();
+            self.tick_count += 1;
+            let needs_input = results.iter().any(|r| {
+                matches!(
+                    r,
+                    InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram
+                )
+            });
+            all_results.extend(results);
+            if needs_input {
+                break;
+            }
+        }
+        all_results
+    }
+
+    /// Run up to `steps_per_frame` steps if running, releasing early when `budget`
+    /// elapses so the caller can give other threads a chance. The clock that gates
+    /// whether it is *time* to call this lives in the stepping thread, not here.
+    pub fn run_steps_budgeted(&mut self, budget: Duration) -> Vec<InterpreterResult> {
+        if !self.running {
+            return Vec::new();
+        }
+        let deadline = Instant::now() + budget;
+        let mut all_results = Vec::new();
+        for i in 0..self.steps_per_frame {
+            if self.interpreter.is_finished() {
+                break;
+            }
+            // Check deadline every 256 steps to avoid per-iteration syscall overhead.
+            if i & 255 == 255 && Instant::now() >= deadline {
+                break;
+            }
+            let results = self.interpreter.step().unwrap().to_vec();
             self.tick_count += 1;
             let needs_input = results.iter().any(|r| {
                 matches!(
@@ -109,73 +136,21 @@ impl RuntimeController {
     }
 
     fn set_tick_speed_ms(&mut self, ms: u64) {
-        let clamped = ms.clamp(Self::MIN_TICK_MS, Self::MAX_TICK_MS);
-        self.tick_speed = Duration::from_millis(clamped);
-        self.clock = Instant::now();
+        self.tick_speed = Duration::from_millis(ms.clamp(Self::MIN_TICK_MS, Self::MAX_TICK_MS));
     }
 
     fn adjust_tick_speed_ms(&mut self, delta_ms: i64) {
-        let current = self.tick_speed.as_millis() as i64;
-        let next = (current + delta_ms).clamp(Self::MIN_TICK_MS as i64, Self::MAX_TICK_MS as i64);
-        self.set_tick_speed_ms(next as u64);
+        let next = (self.tick_speed.as_millis() as i64 + delta_ms)
+            .clamp(Self::MIN_TICK_MS as i64, Self::MAX_TICK_MS as i64) as u64;
+        self.set_tick_speed_ms(next);
     }
 
     fn adjust_steps_per_frame(&mut self, delta: i32) {
-        let current = self.steps_per_frame as i32;
-        let next = (current + delta).clamp(
+        let next = (self.steps_per_frame as i32 + delta).clamp(
             Self::MIN_STEPS_PER_FRAME as i32,
             Self::MAX_STEPS_PER_FRAME as i32,
         );
         self.steps_per_frame = next as usize;
-    }
-
-    pub fn tick(&mut self) -> Vec<InterpreterResult> {
-        if self.running && self.clock.elapsed() >= self.tick_speed {
-            self.clock = Instant::now();
-            return self.run_steps(self.steps_per_frame);
-        }
-        Vec::new()
-    }
-
-    /// Like [`tick`] but releases early if `budget` elapses, so callers that
-    /// hold a lock can give other threads a chance to run.  `steps_per_frame`
-    /// still acts as an upper bound on the number of steps per call.
-    pub fn tick_budgeted(&mut self, budget: Duration) -> Vec<InterpreterResult> {
-        if !self.running || self.clock.elapsed() < self.tick_speed {
-            return Vec::new();
-        }
-        self.clock = Instant::now();
-        let deadline = Instant::now() + budget;
-        let mut all_results = Vec::new();
-        let batch_start = Instant::now();
-        let mut steps_run: usize = 0;
-        for i in 0..self.steps_per_frame {
-            if self.interpreter.is_finished() {
-                break;
-            }
-            // Check the deadline every 256 steps to avoid calling Instant::now()
-            // on every iteration — the syscall overhead adds up at high step counts.
-            if i & 255 == 255 && Instant::now() >= deadline {
-                break;
-            }
-            let results = self.interpreter.step().unwrap().to_vec();
-            self.tick_count += 1;
-            steps_run += 1;
-            let needs_input = results.iter().any(|r| {
-                matches!(
-                    r,
-                    InterpreterResult::InputRequest(_) | InterpreterResult::EndProgram
-                )
-            });
-            all_results.extend(results);
-            if needs_input {
-                break;
-            }
-        }
-        if steps_run > 0 {
-            self.last_step_duration = batch_start.elapsed() / steps_run as u32;
-        }
-        all_results
     }
 
     pub fn handle_command(&mut self, command: AppCommand) -> Vec<InterpreterResult> {
@@ -229,7 +204,6 @@ impl RuntimeController {
             self.tick_speed,
             self.steps_per_frame,
             self.tick_count,
-            self.last_step_duration,
             self.interpreter.num_dots(),
         )
     }
@@ -262,10 +236,6 @@ impl RuntimeController {
 
     pub fn tick_count(&self) -> usize {
         self.tick_count
-    }
-
-    pub fn last_step_duration(&self) -> Duration {
-        self.last_step_duration
     }
 }
 

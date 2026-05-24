@@ -17,11 +17,11 @@ pub struct TravelState {
 
 #[derive(Debug, Clone)]
 pub struct SetState {
-    waiting_input: bool,
+    awaiting_input: bool,
     input: Option<f64>,
-    kind: ValueSelector,
-    acc: Option<u64>,
-    inside_quote: bool,
+    target: ValueSelector,
+    digit_accumulator: Option<u64>,
+    in_quote: bool,
     accumulator: String,
     quoted_assignment_done: bool,
 }
@@ -34,7 +34,7 @@ pub struct WaitingState;
 
 #[derive(Debug, Clone)]
 pub struct PrintingState {
-    inside_quote: bool,
+    in_quote: bool,
     streaming: bool,
     accumulator: String,
     got_modifier: bool,
@@ -42,7 +42,7 @@ pub struct PrintingState {
 
 #[derive(Debug, Clone)]
 pub struct AssertingState {
-    inside_quote: bool,
+    in_quote: bool,
     accumulator: String,
 }
 
@@ -72,13 +72,13 @@ impl MachineState {
         }
     }
 
-    pub(super) fn set(kind: ValueSelector) -> Self {
+    pub(super) fn set(target: ValueSelector) -> Self {
         MachineState::Set(SetState {
-            waiting_input: false,
+            awaiting_input: false,
             input: None,
-            kind,
-            acc: None,
-            inside_quote: false,
+            target,
+            digit_accumulator: None,
+            in_quote: false,
             accumulator: String::default(),
             quoted_assignment_done: false,
         })
@@ -96,7 +96,7 @@ impl MachineState {
         MachineState::Printing(PrintingState {
             accumulator: String::default(),
             streaming: false,
-            inside_quote: false,
+            in_quote: false,
             got_modifier: false,
         })
     }
@@ -104,7 +104,7 @@ impl MachineState {
     pub fn asserting() -> MachineState {
         MachineState::Asserting(AssertingState {
             accumulator: String::default(),
-            inside_quote: false,
+            in_quote: false,
         })
     }
 }
@@ -294,13 +294,13 @@ impl MachineStateExecutor for SetState {
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Set", dot.uuid());
-        if self.waiting_input {
+        if self.awaiting_input {
             return Ok(MachineEvent::Nothing);
         }
-        if self.inside_quote {
+        if self.in_quote {
             dot.step();
             if matches!(token.inner(), AsciiCell::Quote | AsciiCell::QuoteStream) {
-                self.inside_quote = false;
+                self.in_quote = false;
                 let len = self.accumulator.len();
                 let accumulator = std::mem::take(&mut self.accumulator);
                 let parsed: f64 = accumulator.parse().map_err(|_| {
@@ -309,7 +309,7 @@ impl MachineStateExecutor for SetState {
                         (token.span().offset().saturating_sub(len), len).into(),
                     )
                 })?;
-                match self.kind {
+                match self.target {
                     ValueSelector::Value => {
                         dot.set_value(parsed);
                     }
@@ -325,21 +325,21 @@ impl MachineStateExecutor for SetState {
         }
         match token.inner() {
             AsciiCell::Digit(d) => {
-                if self.acc.is_none() {
-                    self.acc = Some(0)
+                if self.digit_accumulator.is_none() {
+                    self.digit_accumulator = Some(0)
                 }
-                self.acc = self.acc.map(|acc| acc * 10 + *d as u64);
+                self.digit_accumulator = self.digit_accumulator.map(|n| n * 10 + *d as u64);
                 dot.step();
             }
             AsciiCell::Quote | AsciiCell::QuoteStream => {
-                self.inside_quote = true;
+                self.in_quote = true;
                 self.accumulator.clear();
                 dot.step();
             }
             AsciiCell::Read => {
                 dot.step();
                 return {
-                    self.waiting_input = true;
+                    self.awaiting_input = true;
                     Ok(MachineEvent::Input(dot.uuid()))
                 };
             }
@@ -356,19 +356,17 @@ impl MachineStateExecutor for SetState {
             self.quoted_assignment_done = false;
             return StateTransition::Transition;
         }
-        if self.inside_quote {
+        if self.in_quote {
             return StateTransition::Stay;
         }
-        if self.waiting_input && self.input.is_some() {
-            match self.kind {
+        if self.awaiting_input && self.input.is_some() {
+            match self.target {
                 ValueSelector::Value => dot.set_value(self.input.unwrap_or_else(|| unreachable!())),
                 ValueSelector::Addr => dot.set_addr(self.input.unwrap_or_else(|| unreachable!())),
             };
-            // TODO: Make test for this bug
-            // dot.set_value(self.input.unwrap_or_else(|| unreachable!()));
             dot.step();
             return StateTransition::Transition;
-        } else if self.waiting_input {
+        } else if self.awaiting_input {
             return StateTransition::Stay;
         }
 
@@ -377,15 +375,15 @@ impl MachineStateExecutor for SetState {
                 StateTransition::Stay
             }
             _ => {
-                match (self.acc, self.kind) {
-                    (Some(acc), ValueSelector::Value) => {
-                        dot.set_value(acc as f64);
+                match (self.digit_accumulator, self.target) {
+                    (Some(n), ValueSelector::Value) => {
+                        dot.set_value(n as f64);
                     }
-                    (Some(acc), ValueSelector::Addr) => {
-                        dot.set_addr(acc as f64);
+                    (Some(n), ValueSelector::Addr) => {
+                        dot.set_addr(n as f64);
                     }
-                    (None, kind) => {
-                        dot.select(kind);
+                    (None, target) => {
+                        dot.select(target);
                     }
                 };
                 StateTransition::Transition
@@ -434,10 +432,10 @@ impl MachineStateExecutor for PrintingState {
         _pending_dots: &mut Vec<DotMachine>,
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Printing", dot.uuid());
-        if self.inside_quote {
+        if self.in_quote {
             dot.step();
             if matches!(*token.inner(), AsciiCell::Quote) {
-                self.inside_quote = false;
+                self.in_quote = false;
                 return Ok(MachineEvent::PrintLn(std::mem::take(&mut self.accumulator)));
             }
             self.accumulator.push(char::from(token.inner()));
@@ -468,7 +466,7 @@ impl MachineStateExecutor for PrintingState {
             }
             AsciiCell::Quote => {
                 dot.step();
-                self.inside_quote = true;
+                self.in_quote = true;
             }
             _ => {
                 dot.step();
@@ -483,7 +481,7 @@ impl MachineStateExecutor for PrintingState {
 
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Printing", dot.uuid());
-        if self.inside_quote || self.streaming {
+        if self.in_quote || self.streaming {
             StateTransition::Stay
         } else {
             match token.inner() {
@@ -511,9 +509,9 @@ impl MachineStateExecutor for AssertingState {
     ) -> Result<MachineEvent, RuntimeDiagnostic> {
         trace!("[state{}] Process Asserting", dot.uuid());
         dot.step();
-        if self.inside_quote {
+        if self.in_quote {
             if matches!(token.inner(), AsciiCell::Quote | AsciiCell::QuoteStream) {
-                self.inside_quote = false;
+                self.in_quote = false;
                 let expected: f64 = self.accumulator.parse().map_err(|_| {
                     RuntimeDiagnostic::failed_to_parse_assert(
                         std::mem::take(&mut self.accumulator),
@@ -538,7 +536,7 @@ impl MachineStateExecutor for AssertingState {
         } else {
             match token.inner() {
                 AsciiCell::Quote | AsciiCell::QuoteStream => {
-                    self.inside_quote = true;
+                    self.in_quote = true;
                 }
                 _ => {}
             }
@@ -548,7 +546,7 @@ impl MachineStateExecutor for AssertingState {
 
     fn next(&mut self, dot: &mut Dot, token: &SpanToken) -> StateTransition {
         trace!("[state{}] Next Asserting", dot.uuid());
-        if self.inside_quote {
+        if self.in_quote {
             StateTransition::Stay
         } else {
             match token.inner() {
