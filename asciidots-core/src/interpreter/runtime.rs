@@ -5,6 +5,7 @@ use log::trace;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
+    engine::swap_cursor::{Entry, SwapCursor},
     filesystem::{Filesystem, NativeFilesystem},
     linker,
     native::{NativeFunction, nativelib},
@@ -344,9 +345,9 @@ impl DotsInterpreter {
     }
 
     /// Returns true if the dot was removed from `self.dots` (caller must not advance i).
-    fn handle_operator(&mut self, i: usize, event: &MachineEvent) -> bool {
+    fn handle_operator<'a>(&mut self, e: Entry<'a, DotMachine>, event: &MachineEvent) {
         let default_token = SpanToken::new(AsciiCell::Empty, ' ', (0, 1).into());
-        let mut dot = self.dots.swap_remove(i);
+        let mut dot = e.take();
         dot.next(event, &default_token);
         let opqueue = self
             .operator_map
@@ -355,10 +356,9 @@ impl DotsInterpreter {
         if let Some(paired) = opqueue.push_and_get_result(dot) {
             self.dots.push(paired);
         }
-        true
     }
 
-    fn handle_io_event(&mut self, event: &MachineEvent, dot_index: usize) {
+    fn handle_io_event<'a>(&mut self, e: Entry<'a, DotMachine>, event: &MachineEvent) {
         match event {
             MachineEvent::Input(uuid) => {
                 self.results.push(InterpreterResult::InputRequest(*uuid));
@@ -371,19 +371,20 @@ impl DotsInterpreter {
             }
             _ => {}
         }
-        let lookahead = self.field.at_spanned(self.dots[dot_index].position());
-        self.dots[dot_index].next(&MachineEvent::Nothing, lookahead);
+        let dot = e.next_mut();
+        let lookahead = self.field.at_spanned(dot.position());
+        dot.next(&MachineEvent::Nothing, lookahead);
     }
 
     /// Returns true if the dot was consumed (display killed it), false if it advanced.
-    fn handle_display(
+    fn handle_display<'a>(
         &mut self,
         display_id: u32,
         direction: Direction,
         addr: f64,
         value: f64,
-        i: usize,
-    ) -> bool {
+        e: Entry<'a, DotMachine>,
+    ) {
         let command = match direction {
             Direction::Right => DisplayCommand::SetWidth(value.round() as usize),
             Direction::Up => DisplayCommand::SetHeight(value.round() as usize),
@@ -398,30 +399,28 @@ impl DotsInterpreter {
             command,
         });
         if direction == Direction::Down {
-            let dot = &mut self.dots[i];
+            let dot = e.next_mut();
             dot.dot_mut().set_dir(Direction::Up).step();
             let lookahead = self.field.at_spanned(dot.position());
             dot.next(&MachineEvent::Nothing, lookahead);
-            false
         } else {
-            self.dots.swap_remove(i);
-            true
+            let _ = e.take();
         }
     }
 
-    fn handle_call_by_id(&mut self, call_id: u32, i: usize) -> bool {
+    fn handle_call_by_id<'a>(&mut self, e: Entry<'a, DotMachine>, call_id: u32) {
         let fun = self.functions.get(call_id as usize);
         match fun {
             Some(FunctionDefinition::Ascii(fun)) => {
+                let dot = e.next_mut();
                 let pos: Position = (fun.x, fun.y).into();
                 let current = self.field.at_spanned(&pos);
-                self.dots[i].dot_mut().call(pos).step();
-                self.dots[i].next(&MachineEvent::Nothing, current);
-                false
+                dot.dot_mut().call(pos).step();
+                dot.next(&MachineEvent::Nothing, current);
             }
             Some(FunctionDefinition::Native(native_name)) => {
                 let native_name = native_name.clone();
-                let mut dot = self.dots.swap_remove(i);
+                let mut dot = e.take();
                 let call_site = *dot.position();
                 dot.dot_mut().call(call_site);
                 if let Some(native_fun) = self.native_registry.get_mut(&native_name) {
@@ -433,72 +432,71 @@ impl DotsInterpreter {
                             span: self.field.at_spanned(&call_site).span(),
                         });
                 }
-                true
             }
             None => {
-                let span = self.field.at_spanned(self.dots[i].position()).span();
+                let dot = e.next();
+                let span = self.field.at_spanned(dot.position()).span();
                 self.diagnostics
                     .push(RuntimeDiagnostic::MissingFunctionDefinition {
                         name: format!("#{call_id}"),
                         span,
                     });
-                false
             }
         }
     }
 
     fn process_active_dots_single_thread(&mut self) {
-        let mut i = 0;
-        while i < self.dots.len() {
-            let token = self.field.at_spanned(self.dots[i].position());
-            let event = match self.dots[i].process(token, &mut self.pending_dots) {
-                Ok(e) => e,
-                Err(d) => {
-                    self.diagnostics.push(d);
-                    MachineEvent::EndProgram
+        let mut cursor = SwapCursor::new(&mut self.dots);
+        while let Some(mut e) = cursor.next() {
+            let event = {
+                let dot = e.peek_mut();
+                let token = self.field.at_spanned(dot.position());
+                match dot.process(token, &mut self.pending_dots) {
+                    Ok(e) => e,
+                    Err(d) => {
+                        self.diagnostics.push(d);
+                        MachineEvent::EndProgram
+                    }
                 }
             };
 
-            let consumed = match event {
+            match event {
                 MachineEvent::EndProgram => {
                     self.handle_end_program();
                     return;
                 }
                 MachineEvent::AssertionFailed { expected, found } => {
-                    self.handle_assertion_failed(expected, found, i);
+                    self.handle_assertion_failed(expected, found, e.idx());
                     return;
                 }
-                MachineEvent::HitOperator => self.handle_operator(i, &event),
+                MachineEvent::HitOperator => self.handle_operator(e, &event),
                 MachineEvent::Input(_) | MachineEvent::PrintLn(_) | MachineEvent::PrintChar(_) => {
-                    self.handle_io_event(&event, i);
-                    false
+                    self.handle_io_event(e, &event);
                 }
                 MachineEvent::Display {
                     display_id,
                     direction,
                     addr,
                     value,
-                } => self.handle_display(display_id, direction, addr, value, i),
+                } => {
+                    self.handle_display(display_id, direction, addr, value, e);
+                }
                 MachineEvent::Call(_, name) => {
-                    let span = self.field.at_spanned(self.dots[i].position()).span();
+                    let dot = e.next();
+                    let span = self.field.at_spanned(dot.position()).span();
                     self.diagnostics
                         .push(RuntimeDiagnostic::MissingFunctionDefinition {
                             name: name.to_string(),
                             span,
                         });
-                    false
                 }
-                MachineEvent::CallById(_, call_id) => self.handle_call_by_id(call_id, i),
+                MachineEvent::CallById(_, call_id) => self.handle_call_by_id(e, call_id),
                 _ => {
-                    let lookahead = self.field.at_spanned(self.dots[i].position());
-                    self.dots[i].next(&event, lookahead);
-                    false
+                    let dot = e.next_mut();
+                    let lookahead = self.field.at_spanned(dot.position());
+                    dot.next(&event, lookahead);
                 }
             };
-
-            if !consumed {
-                i += 1;
-            }
         }
     }
 
@@ -509,13 +507,7 @@ impl DotsInterpreter {
 
         self.collect_native_returns();
         self.merge_native_returns_into_dots();
-        self.process_active_dots();
-    }
-
-    fn process_active_dots(&mut self) {
-        match self.execution_backend {
-            ExecutionBackend::SingleThread => self.process_active_dots_single_thread(),
-        }
+        self.process_active_dots_single_thread();
     }
 
     pub fn cleanup_dead_dots(&mut self) {
