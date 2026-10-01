@@ -4,3 +4,6 @@ samples/superbig.dots
 .vscode/
 .claude/
 .github/
+pkg/
+*.pkg.tar.zst
+Session.vim
